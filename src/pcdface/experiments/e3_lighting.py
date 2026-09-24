@@ -10,7 +10,7 @@ Bootstrap per subjek.
 Tabel:
 - e3_f1                 P/R/F1 per varian × enhancement × cahaya (peta panas grafik 7)
 - e3_ringkasan          F1 keseluruhan dan FPPI kosong per varian × enhancement
-- e3_luminansi          rerata kanal Y per kondisi cahaya (bukti kuantitatif kondisi)
+- e3_luminansi          rerata kanal Y per kondisi cahaya dan per sesi (bukti kuantitatif kondisi)
 - e3_efek_clahe         ΔF1 clahe − none per varian × cahaya (berpasangan)
 - e3_perbandingan       ΔF1 antar detektor per cahaya × enhancement, termasuk equalize on − off
 """
@@ -77,15 +77,20 @@ def run(ctx: RunContext) -> None:
               f"{ds.reference_distance_cm} cm.")
     ctx.table(pd.DataFrame(summary_rows), "e3_ringkasan", "E3 — ringkasan per varian × enhancement")
 
-    luma: dict[str, list[float]] = defaultdict(list)
+    luma: dict[tuple[str, str], list[float]] = defaultdict(list)
     for sample in samples:
         if sample.meta.set != "kosong" and sample.meta.luma_mean is not None:
-            luma[sample.meta.lighting].append(sample.meta.luma_mean)
+            luma[(sample.meta.lighting, "semua")].append(sample.meta.luma_mean)
+            luma[(sample.meta.lighting, sample.meta.session or "(tanpa sesi)")].append(sample.meta.luma_mean)
+    sessions = sorted({s for _, s in luma if s != "semua"})
+    scopes = ["semua"] + (sessions if len(sessions) > 1 else [])
     ctx.table(pd.DataFrame([
-        {"cahaya": l, "citra": len(luma[l]), "rerata_Y": float(np.mean(luma[l])),
-         "sb_Y": float(np.std(luma[l], ddof=1)) if len(luma[l]) > 1 else 0.0}
-        for l in lightings if luma[l]
-    ]), "e3_luminansi", "E3 — rerata luminansi (kanal Y) per kondisi cahaya")
+        {"cahaya": l, "sesi": scope, "citra": len(luma[(l, scope)]), "rerata_Y": float(np.mean(luma[(l, scope)])),
+         "sb_Y": float(np.std(luma[(l, scope)], ddof=1)) if len(luma[(l, scope)]) > 1 else 0.0}
+        for l in lightings for scope in scopes if luma[(l, scope)]
+    ]), "e3_luminansi", "E3 — rerata luminansi (kanal Y) per kondisi cahaya",
+        "Bila data diambil di beberapa sesi, baris per sesi menunjukkan apakah kondisi yang sama "
+        "(mis. 'redup') benar-benar setara antar sesi.")
 
     labels = [label for label, _, _ in variants(ctx)]
     enhancements = cfg.experiments.e3.enhancements

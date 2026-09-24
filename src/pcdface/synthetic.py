@@ -158,11 +158,15 @@ def render_scene(
     return _compose(background, people, mask, lighting, rng), boxes
 
 
+SYNTHETIC_SESSION = "2026-09-30"
+
+
 def _row(spec: CaptureSpec, rel: str, image: np.ndarray, expected: int,
          positions: tuple[int, ...] = ()) -> MetadataRow:
     return MetadataRow(
         file=rel,
         set=spec.set,
+        session=SYNTHETIC_SESSION,
         subject_id=spec.subject_id,
         subjects=spec.subjects,
         formation=spec.formation,

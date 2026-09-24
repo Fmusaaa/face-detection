@@ -51,6 +51,7 @@ class Record:
     formation: str = ""
     positions_cm: tuple[int, ...] = ()
     luma_mean: float | None = None
+    session: str = ""
     labels: dict[str, str] = field(default_factory=dict)  # detektor, mode, resolusi, enhancement
 
     def to_json(self) -> str:
@@ -79,7 +80,7 @@ def run_records(
             scores=list(result.scores) if result.scores is not None else None,
             elapsed_ms=result.elapsed_ms, width=image.shape[1], height=image.shape[0],
             distance_cm=meta.distance_cm, lighting=meta.lighting, formation=meta.formation,
-            positions_cm=tuple(meta.positions_cm), luma_mean=meta.luma_mean,
+            positions_cm=tuple(meta.positions_cm), luma_mean=meta.luma_mean, session=meta.session,
             labels=dict(labels or {}),
         ))
     return records

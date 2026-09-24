@@ -14,6 +14,7 @@ from pcdface.dataset.metadata import (
     write_metadata,
     write_subjects,
 )
+from pcdface.synthetic import SYNTHETIC_SESSION
 from pcdface.tools import crop, forget
 from pcdface.tools.annotate import AnnotationState, Viewport
 from pcdface.tools.capture import build_plan, save_frame
@@ -132,7 +133,7 @@ def test_crop_exports_one_file_per_box(small_cfg, fresh_synthetic):
 # ---------------------------------------------------------------------------
 def capture_args(**overrides):
     base = dict(set="jarak", subject="S01", distance=150, lighting="normal", pose=None,
-                formation=None, subjects=None, count=None, camera=None)
+                formation=None, subjects=None, count=None, camera=None, session=SYNTHETIC_SESSION)
     base.update(overrides)
     return argparse.Namespace(**base)
 

@@ -77,6 +77,8 @@ class RunContext:
             self._samples[sets] = report.samples
             counts = pd.Series([s.meta.set for s in report.samples]).value_counts().to_dict()
             self.notes.setdefault("sampel", {}).update({k: int(v) for k, v in counts.items()})
+            sessions = pd.Series([s.meta.session or "(tanpa sesi)" for s in report.samples]).value_counts().to_dict()
+            self.notes.setdefault("sampel_per_sesi", {}).update({str(k): int(v) for k, v in sessions.items()})
         return self._samples[sets]
 
     def require(self, samples: list[Sample], set_name: str) -> list[Sample]:

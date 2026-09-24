@@ -29,18 +29,20 @@ python -m pcdface selftest
 2. Isi `data/subjects.csv` — kode peserta dan izinnya saja, **tanpa nama** (lihat [`data/README.md`](data/README.md)).
 3. Matikan **Center Stage, Studio Light, Portrait** (Control Center → Video Effects saat kamera aktif).
    Tempel lakban di lantai pada 50, 100, 150, 200, 250, 300 cm.
-4. Rekam. Contoh untuk satu peserta:
+4. Rekam. Data boleh diambil di beberapa pertemuan — beri satu kode sesi per pertemuan dan rekam
+   **seluruh set jarak + cahaya seorang peserta dalam sesi yang sama** (PRD §6.2). Contoh untuk satu peserta:
 
 ```bash
-for d in 50 100 150 200 250 300; do python -m pcdface capture --set jarak --subject S01 --distance $d; done
-for l in terang redup backlight; do python -m pcdface capture --set cahaya --subject S01 --lighting $l; done
+SESI=2026-10-01-sore
+for d in 50 100 150 200 250 300; do python -m pcdface capture --session $SESI --set jarak --subject S01 --distance $d; done
+for l in terang redup backlight; do python -m pcdface capture --session $SESI --set cahaya --subject S01 --lighting $l; done
 ```
 
    Multi-wajah — urutan `--subjects` adalah urutan **kiri → kanan di layar** (pratinjau tidak dicerminkan):
 
 ```bash
-python -m pcdface capture --set multi --formation F5 --subjects S02,S05,S01
-python -m pcdface capture --set kosong --count 20
+python -m pcdface capture --session $SESI --set multi --formation F5 --subjects S02,S05,S01
+python -m pcdface capture --session $SESI --set kosong --count 20
 ```
 
    Tombol: SPASI simpan, q keluar. Frame yang bukan 1280×720 ditolak; peserta yang belum terdaftar

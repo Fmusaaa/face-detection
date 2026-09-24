@@ -11,6 +11,7 @@ Tabel:
 - e1_ukuran_px / e1_ukuran_proporsi   recall per bin ukuran wajah
 - e1_ukuran_minimum     ukuran wajah minimum (px dan proporsi) per detektor
 - e1_loglog             validasi model kamera: kemiringan log(w) vs log(Z)
+- e1_loglog_per_sesi    sama, per sesi pengambilan (hanya bila > 1 sesi) — kamera bergeser?
 - e1_klaim_dokumentasi  recall ≤200 cm vs >200 cm (klaim MediaPipe 2 m / 5 m)
 - e1_resolusi           H2: selisih recall 1280 − 640 per detektor (berpasangan)
 - e1_perbandingan       selisih berpasangan antar detektor (F1, recall, AP)
@@ -190,6 +191,25 @@ def run(ctx: RunContext) -> None:
                             "kemiringan_high": high, "intersep": fit.intercept, "r2": fit.r2, "persamaan": fit.equation})
     ctx.table(pd.DataFrame(loglog_rows), "e1_loglog", "E1 — validasi model kamera lubang jarum",
               "Kemiringan ≈ −1 membuktikan w ∝ 1/Z. Jauh dari −1 → periksa Center Stage (PRD §8.4).")
+
+    first = faces(op[(e1.detectors[0], res_label(e1.resolutions[0]))])
+    sessions = sorted({r.session for r in first})
+    if len(sessions) > 1:
+        session_rows = []
+        for session in sessions:
+            subset = [r for r in first if r.session == session]
+            distances = {r.distance_cm for r in subset}
+            row = {"sesi": session, "n": len(subset), "jarak_cm": ", ".join(str(d) for d in sorted(distances))}
+            if len(subset) >= 3 and len(distances) >= 2:
+                fit = loglog_fit([r.distance_cm for r in subset], [r.gt[0][2] for r in subset])
+                low, high = fit.slope_ci95
+                row.update({"kemiringan": fit.slope, "kemiringan_low": low, "kemiringan_high": high,
+                            "intersep": fit.intercept, "r2": fit.r2})
+            session_rows.append(row)
+        ctx.table(pd.DataFrame(session_rows), "e1_loglog_per_sesi",
+                  f"E1 — validasi model kamera per sesi ({res_label(e1.resolutions[0])})",
+                  "Intersep yang berbeda jauh antar sesi berarti ukuran wajah pada jarak sama tidak setara — "
+                  "posisi kamera, zoom, atau Center Stage berubah. Butuh ≥ 2 jarak per sesi.")
 
     # --- klaim dokumentasi MediaPipe -------------------------------------------
     claim_rows = []

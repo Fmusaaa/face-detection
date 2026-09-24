@@ -1,7 +1,7 @@
 """Skema `metadata.csv` dan `subjects.csv`, serta aturan penamaan berkas.
 
-Satu baris metadata per foto (PRD §6.6, ditambah kolom `subjects` dan `pose`
-— PRD §12.2 butir 7). `subjects.csv` hanya memuat kode peserta dan izinnya;
+Satu baris metadata per foto (PRD §6.6, ditambah kolom `subjects`, `pose`, dan
+`session` — PRD §12.2 butir 7, §6.2). `subjects.csv` hanya memuat kode peserta dan izinnya;
 nama asli tidak pernah disimpan di folder proyek.
 """
 
@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import Iterable
 
 COLUMNS = (
-    "file", "set", "subject_id", "subjects", "formation", "positions_cm",
+    "file", "set", "session", "subject_id", "subjects", "formation", "positions_cm",
     "distance_cm", "lighting", "pose", "expected_faces", "luma_mean",
     "width", "height", "captured_at",
 )
+# Kolom yang boleh tidak ada di berkas lama; dianggap kosong saat dibaca
+OPTIONAL_COLUMNS = frozenset({"session"})
 SUBJECT_COLUMNS = ("subject_id", "consent_research", "consent_publication", "consent_date")
 
 SUBJECT_ID = re.compile(r"^S\d{2,3}$")
@@ -40,6 +42,7 @@ class MetadataRow:
     width: int
     height: int
     lighting: str = "normal"
+    session: str = ""                           # sesi pengambilan, mis. 2026-09-30 atau 2026-09-30-sore
     subject_id: str = ""                        # set satu wajah
     subjects: tuple[str, ...] = ()              # multi-wajah, kiri → kanan
     formation: str = ""
@@ -65,6 +68,7 @@ class MetadataRow:
         return {
             "file": self.file,
             "set": self.set,
+            "session": self.session,
             "subject_id": self.subject_id,
             "subjects": _LIST_SEP.join(self.subjects),
             "formation": self.formation,
@@ -87,6 +91,7 @@ class MetadataRow:
         return cls(
             file=row["file"],
             set=row["set"],
+            session=row.get("session", "") or "",
             subject_id=row.get("subject_id", "") or "",
             subjects=tuple(split(row.get("subjects", ""))),
             formation=row.get("formation", "") or "",
@@ -108,7 +113,7 @@ def read_metadata(path: Path) -> list[MetadataRow]:
         return []
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        missing = set(COLUMNS) - set(reader.fieldnames or ())
+        missing = set(COLUMNS) - OPTIONAL_COLUMNS - set(reader.fieldnames or ())
         if missing:
             raise ValueError(f"{path}: kolom hilang {sorted(missing)}")
         rows = []

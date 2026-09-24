@@ -59,8 +59,10 @@ S02,ya,ya,2026-09-30
 
 ## `metadata.csv` — diisi otomatis
 
-Kolom mengikuti PRD §6.6, ditambah dua kolom:
+Kolom mengikuti PRD §6.6, ditambah tiga kolom:
 
+- `session` — kode sesi pengambilan (`capture --session`, bawaan tanggal hari itu). Data boleh
+  diambil di beberapa pertemuan; aturannya di PRD §6.2.
 - `subjects` — kode peserta pada foto multi-wajah, urut **kiri → kanan di
   citra** (mis. `S02;S05;S01`), sama urutannya dengan `positions_cm`. Dibutuhkan
   `forget` untuk menemukan foto multi-wajah yang memuat seorang peserta.

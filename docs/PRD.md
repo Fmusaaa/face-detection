@@ -171,9 +171,17 @@ Karena tidak ada pengenalan, identitas tidak dipakai oleh sistem. ID pseudonim (
 
 Setiap subjek menandatangani formulir persetujuan sebelum difoto (§11).
 
-### 6.2 Satu pertemuan cukup
+### 6.2 Pertemuan dan sesi
 
-Berbeda dari v2, deteksi tidak membutuhkan sesi pendaftaran dan sesi pengujian terpisah. Seluruh data bisa diambil dalam **satu pertemuan kelompok (±2 jam)**. Set multi-wajah memang butuh semua orang hadir bersamaan, jadi jadwalkan satu pertemuan untuk semuanya.
+Data boleh diambil dalam **beberapa pertemuan (sesi)** pada waktu berbeda. Risikonya: sesi bisa ikut memengaruhi hasil — cahaya ruangan dan posisi kamera jarang persis sama. Aturan supaya efek sesi tidak tercampur dengan faktor eksperimen:
+
+1. **Setiap foto diberi kode sesi** (`capture --session`, bawaan tanggal hari itu). Satu pertemuan = satu kode, mis. `2026-10-01-sore`. Tersimpan di kolom `session` metadata.
+2. **Satu peserta, satu sesi**: set jarak, cahaya, dan pose seorang peserta direkam dalam sesi yang sama (±20 menit). Kondisi *normal* E3 diambil dari set jarak di 100 cm, jadi harus satu sesi dengan set cahayanya.
+3. **Multi-wajah** butuh semua peserta formasi hadir bersamaan — rekam di sesi dengan kehadiran terbanyak. Formasi 4 orang (F3, F6) butuh minimal 4 peserta hadir.
+4. **Setup kamera identik setiap sesi**: posisi dan tinggi lensa, tanda lakban diukur ulang dari kamera, Center Stage/Studio Light/Portrait mati. Foto setup sebagai catatan Metodologi.
+5. **Cahaya ditentukan pengaturan, bukan jam.** *Normal* = lampu ruangan menyala dengan tirai dalam posisi yang sama; *redup* = lampu utama mati/tirai tertutup; *terang* = lampu tambahan ke arah wajah; *backlight* = sumber cahaya terang di belakang peserta. Hindari mengandalkan sinar matahari yang berubah menurut jam; `luma_mean` membuktikan kondisinya.
+6. **Pemeriksaan otomatis**: `validate` memperingatkan bila data seorang peserta terpecah di beberapa sesi atau bila kecerahan *normal* berbeda jauh antar sesi; `e1_loglog_per_sesi` menunjukkan apakah ukuran wajah per jarak sama antar sesi (kamera bergeser?); `e3_luminansi` memuat rerata Y per sesi.
+7. Perbedaan antar sesi yang tidak bisa dihindari dibahas sebagai keterbatasan.
 
 ### 6.3 Pengaturan kamera
 
@@ -234,6 +242,7 @@ Tool perekam menulis satu baris ke `data/metadata.csv` untuk setiap frame:
 | `positions_cm` | `80;150;250` | Jarak tiap posisi kiri→kanan, hanya untuk `multi` |
 | `distance_cm` | `150` | Untuk set satu wajah |
 | `lighting` | `normal` | `normal`, `terang`, `redup`, `backlight` |
+| `session` | `2026-10-01-sore` | Kode sesi pengambilan (§6.2) |
 | `expected_faces` | `3` | Dipakai `validate` untuk mencocokkan jumlah kotak anotasi |
 | `luma_mean` | `112.4` | Rerata kanal Y, otomatis — bukti kuantitatif kondisi cahaya |
 | `width`, `height` | `1280`, `720` | Validasi resolusi |
@@ -564,7 +573,7 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 | Minggu | Tanggal | Target |
 |---|---|---|
 | 1 | 23–29 Sep | Fase 0–1; formulir persetujuan ditandatangani |
-| 2 | 30 Sep–6 Okt | Fase 2; **satu pertemuan kelompok** untuk seluruh pengambilan data; mulai anotasi |
+| 2 | 30 Sep–6 Okt | Fase 2; pertemuan pengambilan data (boleh beberapa sesi, §6.2); mulai anotasi |
 | 3 | 7–13 Okt | Fase 3; selesaikan anotasi dan crop |
 | 4 | 14–20 Okt | Fase 4; jalankan E1–E4 |
 | 5 | 21–27 Okt | Fase 5; susun draf paper; latihan demo |

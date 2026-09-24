@@ -142,6 +142,51 @@ def _check_boxes(row: MetadataRow, boxes: list, image_size: tuple[int, int] | No
     return issues
 
 
+NORMAL_LUMA_SPREAD = 25.0  # selisih rerata Y "normal" antar sesi yang dianggap mencurigakan
+
+
+def _session_checks(rows: list[MetadataRow], reference_cm: int) -> list[Issue]:
+    """Peringatan bila sesi berbeda bisa tercampur dengan faktor eksperimen (PRD §6.2)."""
+    issues: list[Issue] = []
+    without = [r.file for r in rows if not r.session]
+    if without:
+        issues.append(Issue(WARNING, f"{len(without)} foto", "tanpa kode sesi (kolom session kosong)"))
+
+    by_subject: dict[str, list[MetadataRow]] = {}
+    for row in rows:
+        if row.subject_id and row.session:
+            by_subject.setdefault(row.subject_id, []).append(row)
+    for subject_id, own in sorted(by_subject.items()):
+        sessions = sorted({r.session for r in own})
+        if len(sessions) <= 1:
+            continue
+        normal = {r.session for r in own if r.set == "jarak" and r.distance_cm == reference_cm}
+        lighting = {r.session for r in own if r.set == "cahaya"}
+        if normal and lighting and not normal & lighting:
+            issues.append(Issue(WARNING, subject_id,
+                                f"kondisi normal ({reference_cm} cm, set jarak) di sesi {sorted(normal)} tetapi set "
+                                f"cahaya di sesi {sorted(lighting)} — perbandingan cahaya E3 tercampur efek sesi"))
+        distance_sessions = {r.session for r in own if r.set == "jarak"}
+        if len(distance_sessions) > 1:
+            issues.append(Issue(WARNING, subject_id,
+                                f"set jarak terpecah di sesi {sorted(distance_sessions)} — pastikan posisi kamera dan "
+                                "tanda lakban identik (periksa e1_loglog_per_sesi)"))
+
+    luma: dict[str, list[float]] = {}
+    for row in rows:
+        if row.set == "jarak" and row.session and row.luma_mean is not None:
+            luma.setdefault(row.session, []).append(row.luma_mean)
+    if len(luma) > 1:
+        means = {s: sum(v) / len(v) for s, v in luma.items()}
+        spread = max(means.values()) - min(means.values())
+        if spread > NORMAL_LUMA_SPREAD:
+            detail = ", ".join(f"{s}: {m:.0f}" for s, m in sorted(means.items()))
+            issues.append(Issue(WARNING, "cahaya normal",
+                                f"rerata Y set jarak berbeda {spread:.0f} antar sesi ({detail}) — kondisi 'normal' "
+                                "tidak sama; samakan lampu/tirai atau bahas sebagai keterbatasan"))
+    return issues
+
+
 def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True) -> tuple[list[Issue], dict[str, int]]:
     """Kembalikan (daftar masalah, ringkasan jumlah citra per set)."""
     issues: list[Issue] = []
@@ -186,6 +231,8 @@ def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True
     for key in sorted(set(annotations) - known):
         issues.append(Issue(ERROR, key, "anotasi yatim: tidak ada di metadata"))
 
+    issues += _session_checks(rows, cfg.dataset.reference_distance_cm)
+
     used = {person for row in rows for person in row.people}
     for subject_id in sorted(set(subjects) - used):
         issues.append(Issue(WARNING, subject_id, "terdaftar di subjects.csv tetapi belum punya foto"))
@@ -193,6 +240,7 @@ def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True
     summary = dict(Counter(row.set for row in rows))
     summary["dianotasi"] = sum(1 for row in rows if row.file in annotations)
     summary["peserta"] = len(used)
+    summary["sesi"] = len({row.session for row in rows if row.session})
     return issues, summary
 
 

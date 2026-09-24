@@ -19,7 +19,7 @@ Sistem ini **tidak mengenali siapa Anda**. Ia hanya menandai kotak di sekitar wa
 - Beberapa foto bersama anggota kelompok lain (2–4 orang dalam satu foto).
 - Kotak lokasi wajah yang digambar secara manual pada foto-foto tersebut.
 
-Seluruh pengambilan foto dilakukan dalam satu pertemuan, sekitar 20 menit per orang ditambah sesi foto bersama.
+Pengambilan foto dilakukan dalam satu atau beberapa pertemuan, sekitar 20 menit per orang ditambah sesi foto bersama.
 
 Foto wajah termasuk data pribadi. Undang-Undang No. 27 Tahun 2022 tentang Pelindungan Data Pribadi, Pasal 4 ayat (2), menggolongkan data biometrik sebagai data pribadi yang bersifat spesifik.
 

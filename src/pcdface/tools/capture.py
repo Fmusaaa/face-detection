@@ -21,18 +21,21 @@ Aturan yang dijaga alat ini:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Callable
 
 import cv2
 import numpy as np
 
-from pcdface.config import Config
+from pcdface.config import Config, DatasetConfig
 from pcdface.dataset.metadata import (
     SUBJECT_ID,
     CaptureSpec,
     MetadataRow,
+    SubjectRow,
     append_metadata,
     next_index,
     read_metadata,
@@ -49,12 +52,16 @@ CHECKLIST = (
 )
 
 
+SESSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]{0,39}$")
+
+
 @dataclass(frozen=True)
 class CapturePlan:
     spec: CaptureSpec
     positions_cm: tuple[int, ...]
     expected_faces: int
     count: int
+    session: str = ""
 
     def describe(self) -> str:
         spec = self.spec
@@ -87,7 +94,22 @@ def build_plan(args: argparse.Namespace, cfg: Config, paths: ProjectPaths) -> Ca
 
     if args.set not in ds.sets:
         raise ValueError(f"set '{args.set}' tidak dikenal. Pilihan: {', '.join(ds.sets)}")
+    session = getattr(args, "session", None) or datetime.now().strftime("%Y-%m-%d")
+    if not SESSION_PATTERN.match(session):
+        raise ValueError(f"--session hanya huruf, angka, '-' atau '_' (maks. 40), dapat {session!r}")
+    plan = _build_spec(args, cfg, ds, subjects, count, require_consent)
+    return replace(plan, session=session)
 
+
+def _build_spec(
+    args: argparse.Namespace,
+    cfg: Config,
+    ds: DatasetConfig,
+    subjects: dict[str, SubjectRow],
+    count: int,
+    require_consent: Callable[[str], None],
+) -> CapturePlan:
+    """Rencana rekam per set, tanpa sesi (sesi ditambahkan oleh build_plan)."""
     if args.set in ("jarak", "cahaya", "pose"):
         require_consent(args.subject)
         if args.set == "jarak":
@@ -133,6 +155,7 @@ def make_row(plan: CapturePlan, relative_path: str, frame: np.ndarray) -> Metada
     return MetadataRow(
         file=relative_path,
         set=spec.set,
+        session=plan.session,
         subject_id=spec.subject_id,
         subjects=spec.subjects,
         formation=spec.formation,
@@ -174,7 +197,7 @@ def _draw_overlay(frame: np.ndarray, plan: CapturePlan, saved: int) -> np.ndarra
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2, cv2.LINE_AA)
     else:
         cv2.drawMarker(preview, (width // 2, int(height * 0.45)), (0, 200, 255), cv2.MARKER_CROSS, 40, 1)
-    status = f"{plan.describe()} | tersimpan {saved}/{plan.count} | Y {mean_luma(frame):.0f}"
+    status = f"sesi {plan.session} | {plan.describe()} | tersimpan {saved}/{plan.count} | Y {mean_luma(frame):.0f}"
     cv2.rectangle(preview, (0, 0), (width, 34), (20, 20, 20), -1)
     cv2.putText(preview, status, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(preview, "SPASI=simpan  q=keluar  |  Center Stage harus MATI", (10, height - 15),
@@ -192,6 +215,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--subjects", help="Peserta multi-wajah kiri → kanan DI CITRA, mis. S02,S05,S01")
     parser.add_argument("--count", type=int, default=None, help="Jumlah frame (bawaan: dataset.frames_per_condition)")
     parser.add_argument("--camera", type=int, default=None, help="Indeks kamera (bawaan: capture.camera_index)")
+    parser.add_argument("--session", default=None,
+                        help="Kode sesi pengambilan (bawaan: tanggal hari ini, mis. 2026-09-30). "
+                             "Pakai kode sama untuk seluruh pertemuan, mis. 2026-09-30-sore")
 
 
 def run(args: argparse.Namespace, cfg: Config, paths: ProjectPaths | None = None) -> int:
@@ -203,7 +229,7 @@ def run(args: argparse.Namespace, cfg: Config, paths: ProjectPaths | None = None
         return 2
 
     print("\n".join(CHECKLIST))
-    print(f"\nRekam: {plan.describe()} — {plan.count} frame\n")
+    print(f"\nSesi {plan.session} — rekam: {plan.describe()} — {plan.count} frame\n")
 
     camera_index = cfg.capture.camera_index if args.camera is None else args.camera
     camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else cv2.CAP_ANY)
