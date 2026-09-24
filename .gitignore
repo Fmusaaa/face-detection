@@ -1,0 +1,19 @@
+# Lingkungan dan cache
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Data wajah — tidak pernah di-commit (PRD §11), kecuali README.md dan .gitkeep
+data/**
+!data/**/
+!data/**/.gitkeep
+!data/README.md
+
+# Model — hanya checksums.txt yang di-commit
+models/*.tflite
+models/*.part
+
+# Hasil eksperimen memuat citra wajah
+results/

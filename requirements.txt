@@ -1,0 +1,7 @@
+opencv-contrib-python>=4.8,<5   # JANGAN pasang opencv-python di environment yang sama
+mediapipe==1.0.1
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+pyyaml>=6.0
+pytest>=8.0
