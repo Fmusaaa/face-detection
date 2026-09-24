@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcdface"
+version = "0.3.0"
+description = "Deteksi wajah: OpenCV Haar Cascade vs MediaPipe BlazeFace (UTS Pengolahan Citra Digital)"
+requires-python = ">=3.12"
+# Dependensi dipatok di requirements.txt (lihat PRD §13.2), bukan di sini,
+# supaya `pip install -e .` tidak pernah menarik opencv-python.
+dependencies = []
+
+[project.scripts]
+pcdface = "pcdface.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not models'"
+markers = [
+    "models: butuh berkas .tflite di models/ dan MediaPipe (jalankan dengan: pytest -m models)",
+]
+filterwarnings = ["ignore::DeprecationWarning:mediapipe.*"]

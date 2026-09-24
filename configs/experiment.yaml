@@ -1,0 +1,117 @@
+# Konfigurasi eksperimen — satu-satunya sumber faktor, level, ambang, dan seed.
+# Salinannya ditulis ke results/<eksperimen>/config_snapshot.yaml setiap run.
+# Keputusan yang ditetapkan sebelum data diambil: docs/PRD.md §12.2.
+
+seed: 42
+
+paths:                               # relatif terhadap akar proyek
+  raw: data/raw
+  metadata: data/metadata.csv
+  subjects: data/subjects.csv
+  annotations: data/annotations/boxes.json
+  crops: data/crops
+  models: models
+  results: results
+
+capture:
+  width: 1280
+  height: 720
+  camera_index: 0
+
+dataset:
+  sets: [jarak, cahaya, multi, kosong, pose]
+  distances_cm: [50, 100, 150, 200, 250, 300]
+  lightings: [normal, terang, redup, backlight]
+  poses: [kiri, kanan, menunduk, mendongak]
+  reference_distance_cm: 100         # jarak set cahaya dan pose
+  frames_per_condition: 5
+  empty_images: 20
+  formations:                        # posisi kiri → kanan di citra
+    F1: [100, 100]
+    F2: [100, 100, 100]
+    F3: [150, 150, 150, 150]
+    F4: [100, 200]
+    F5: [80, 150, 250]
+    F6: [80, 130, 200, 300]
+
+preprocessing:
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: [8, 8]
+
+detectors:
+  haar:
+    type: haar
+    scale_factor: 1.1
+    min_neighbors: 5
+    min_size: [30, 30]
+    equalize: true                   # E3 menguji true dan false (PRD §12.2 butir 2)
+  mp_short:
+    type: mediapipe
+    model: blaze_face_short_range.tflite
+    min_detection_confidence: 0.5
+    min_suppression_threshold: 0.3
+  mp_full:
+    type: mediapipe
+    model: blaze_face_full_range.tflite
+    min_detection_confidence: 0.5
+    min_suppression_threshold: 0.3
+  mp_sparse:                         # P1
+    type: mediapipe
+    model: blaze_face_full_range_sparse.tflite
+    min_detection_confidence: 0.5
+    min_suppression_threshold: 0.3
+  ycbcr:                             # P1 — Chai & Ngan (1999)
+    type: ycbcr
+    cb_range: [77, 127]
+    cr_range: [133, 173]
+    opening_kernel: 5
+    closing_kernel: 11
+    opening_iterations: 1
+    closing_iterations: 2
+    min_area_ratio: 0.002            # ≈ 43×43 px pada 1280×720
+    max_area_ratio: 0.5
+    aspect_range: [0.55, 1.30]       # lebar / tinggi
+    min_solidity: 0.45
+
+evaluation:
+  iou_primary: 0.5
+  iou_sensitivity: [0.3, 0.4]
+  recall_target: 0.90
+  ap_run:                            # run ambang rendah untuk kurva PR (PRD §8.2)
+    mp_min_detection_confidence: 0.05
+    haar_min_neighbors: 0
+    haar_nms_iou: 0.3                # samakan dengan min_suppression_threshold MediaPipe
+  size_bins_px: [0, 20, 30, 40, 50, 60, 80, 100, 150, 250, 10000]
+  size_bins_ratio: [0, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15, 0.25, 1.0]
+
+experiments:
+  e1:
+    detectors: [haar, mp_short, mp_full]
+    resolutions: [[1280, 720], [640, 360]]
+  e2:
+    detectors: [haar, mp_short, mp_full]
+  e3:
+    detectors: [haar, mp_short, mp_full]
+    haar_equalize: [true, false]
+    enhancements: [none, clahe]
+  e4:
+    detectors: [haar, mp_short, mp_full]
+    resolutions: [[1280, 720], [640, 360]]
+    warmup_runs: 1
+    repeats: 100
+    sample_images: 10                # citra per set, diambil acak dengan seed
+  e5:
+    enabled: false                   # P1
+    scale_factors: [1.05, 1.1, 1.2]
+    min_neighbors: [3, 5, 7]
+
+stats:
+  ci_level: 0.95
+  bootstrap_resamples: 1000
+
+synthetic:                           # hanya untuk --synthetic dan tes
+  subjects: 4
+  frames_per_condition: 2
+  empty_images: 6
+  focal_px: 1000.0                   # model lubang jarum: w_px = f × W / Z
+  face_width_cm: 15.0

@@ -11,13 +11,13 @@
 
 | Versi | Arah | Status |
 |---|---|---|
-| v1 | Deteksi klasik: segmentasi warna kulit YCbCr + Haar Cascade | Kode sudah ada, dipakai ulang |
+| v1 | Deteksi klasik: segmentasi warna kulit YCbCr + Haar Cascade | Kode **tidak dipakai** — v3 dibangun dari awal |
 | v2 | Deteksi + pengenalan identitas memakai DeepFace | **Dibatalkan** |
 | **v3** | **Deteksi saja — OpenCV (Haar Cascade) vs MediaPipe (BlazeFace)** | Dokumen ini |
 
 **Ruang lingkup v3:** sistem hanya menentukan **ada atau tidaknya wajah dan di mana letaknya** (kotak pembatas). Tidak ada pengenalan identitas, tidak ada database wajah, tidak ada DeepFace, tidak ada TensorFlow.
 
-Kode v1 tidak dibuang. Detektor Haar, preprocessing, modul evaluasi, tool capture, anotasi, dan demo realtime semuanya dipakai ulang dan diperluas.
+v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang disalin dan tidak ada uji regresi v1. Gagasan v1 — enhancement pada kanal Y, detektor warna kulit YCbCr, greedy matching — ditulis ulang di paket `pcdface`.
 
 ---
 
@@ -41,7 +41,7 @@ Kode v1 tidak dibuang. Detektor Haar, preprocessing, modul evaluasi, tool captur
 | `mp_short` | MediaPipe Face Detector, model BlazeFace *short-range* | CNN ringan | **P0** |
 | `mp_full` | MediaPipe Face Detector, model BlazeFace *full-range* | CNN ringan | **P0** — bila model berhasil diunduh di Fase 0 |
 | `mp_sparse` | MediaPipe BlazeFace Sparse *full-range* | CNN, ±60% lebih kecil dari full-range | P1 |
-| `ycbcr` | Segmentasi warna kulit YCbCr dari v1 | Klasik — pengolahan citra murni | P1 |
+| `ycbcr` | Segmentasi warna kulit YCbCr (Chai & Ngan, 1999) | Klasik — pengolahan citra murni | P1 |
 
 ### 2.1 Perbedaan mekanisme — inti pembahasan jurnal
 
@@ -117,11 +117,11 @@ Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandak
 ```
 citra (BGR, OpenCV)
    │
-   ├─► enhancement pada kanal Y (none | clahe)          ← warisan v1
+   ├─► enhancement pada kanal Y (none | clahe)
    │
    ├─► DETEKTOR ───────────────────────────────────────────────────────┐
-   │     haar       → abu-abu (equalize: on|off) → detectMultiScale3    │
-   │     mp_short   → konversi BGR→RGB → mp.Image → FaceDetector        │
+   │     haar       → abu-abu (equalize: on|off) → detectMultiScale(3)  │
+   │     mp_short   → BGR→RGBA → mp.Image(SRGBA) → FaceDetector (Metal) │
    │     mp_full    → sama, model full-range                            │
    │     ycbcr (P1) → segmentasi kulit + morfologi + CCL                │
    │                                                                    ▼
@@ -132,7 +132,7 @@ citra (BGR, OpenCV)
                                                   akurasi hitung, per jarak
 ```
 
-Semua detektor mengembalikan tipe `DetectionResult` yang sama. Tipe dari v1 diperluas dengan medan `scores` (daftar skor per kotak, `None` bila detektor tidak punya skor) — nilai bawaannya membuat kode v1 tetap berjalan tanpa perubahan.
+Semua detektor mengembalikan tipe `DetectionResult` yang sama: `boxes`, `scores` (daftar skor per kotak, `None` bila detektor tidak punya skor), `elapsed_ms`, `stages` (citra antar-tahap, opsional), dan `info` (keterangan khusus detektor, mis. kandidat YCbCr yang ditolak). Dataclass-nya `kw_only`, jadi urutan medan tidak berpengaruh.
 
 ### 5.1 Ketentuan implementasi Haar
 
@@ -245,7 +245,7 @@ Untuk citra multi-wajah, jarak setiap kotak ditentukan dengan mengurutkan kotak 
 
 ## 7. Crop Manual sebagai Ground Truth (R2)
 
-Tool anotasi v1 dipakai untuk menggambar kotak di **setiap wajah pada setiap citra**. Kotak ini menjadi kebenaran acuan (*ground truth*) seluruh evaluasi. Format JSON v1 dipertahankan — daftar `[x, y, w, h]` per citra.
+Tool `annotate` dipakai untuk menggambar kotak di **setiap wajah pada setiap citra**. Kotak ini menjadi kebenaran acuan (*ground truth*) seluruh evaluasi. Formatnya JSON — daftar `[x, y, w, h]` per citra, dengan kunci path relatif terhadap `data/raw/`.
 
 Perintah `crop` mengekspor isi setiap kotak ke `data/crops/{set}/...` untuk tiga kegunaan: memeriksa konsistensi anotasi secara visual, mengukur lebar wajah per jarak, dan menyediakan contoh gambar untuk laporan (hanya subjek yang mengizinkan publikasi).
 
@@ -261,7 +261,7 @@ Perintah `crop` mengekspor isi setiap kotak ke `data/crops/{set}/...` untuk tiga
 
 | Metrik | Definisi |
 |---|---|
-| TP, FP, FN | Pencocokan greedy pada IoU ≥ ambang (logika v1) |
+| TP, FP, FN | Pencocokan greedy pada IoU ≥ ambang: semua pasangan diurutkan menurun menurut IoU, diambil selama kedua anggotanya belum terpakai |
 | Precision, Recall, F1 | Dari TP/FP/FN |
 | Rerata IoU | Rata-rata IoU pasangan yang cocok — ketepatan letak kotak |
 | **FPPI** | *False positives per image* — jumlah deteksi palsu dibagi jumlah citra, termasuk set kosong |
@@ -423,27 +423,29 @@ pcd-face-detection/
 │   ├── cli.py
 │   ├── paths.py                      # PROJECT_ROOT dan path bawaan
 │   ├── config.py                     # muat + validasi experiment.yaml
-│   ├── preprocessing.py              # ← v1, tanpa perubahan perilaku
-│   ├── synthetic.py                  # ← v1, + pembangkit multi-wajah dan citra kosong
+│   ├── preprocessing.py              # enhancement kanal Y (none | clahe), luminansi
+│   ├── synthetic.py                  # dataset sintetis lengkap (semua set) untuk --synthetic dan tes
 │   ├── dataset/
-│   │   ├── metadata.py               # skema metadata.csv
+│   │   ├── metadata.py               # skema metadata.csv + subjects.csv
+│   │   ├── annotations.py            # baca/tulis boxes.json
+│   │   ├── loader.py                 # gabung metadata + anotasi menjadi sampel
 │   │   └── resize.py                 # versi 640×360 + penskalaan ground truth
 │   ├── detection/
 │   │   ├── base.py                   # DetectionResult(boxes, scores, elapsed_ms, stages)
-│   │   ├── haar.py                   # ← v1 + detectMultiScale3 (skor) + flag equalize
+│   │   ├── haar.py                   # detectMultiScale (titik operasi), detectMultiScale3 + NMS (run AP), flag equalize
 │   │   ├── mediapipe_detector.py     # Tasks API, short/full/sparse
-│   │   ├── ycbcr.py                  # ← v1
+│   │   ├── ycbcr.py                  # segmentasi kulit + morfologi + CCL + saring geometri
 │   │   ├── fake.py                   # detektor tiruan untuk tes tanpa model
 │   │   └── registry.py               # nama → detektor, dibaca dari config
 │   ├── evaluation/
-│   │   ├── matching.py               # ← v1 evaluation.py: IoU, greedy matching
+│   │   ├── matching.py               # IoU, greedy matching, pencocokan urut skor (AP)
 │   │   ├── operating_point.py        # P/R/F1, rerata IoU, FPPI
 │   │   ├── average_precision.py      # kurva PR, AP all-point
 │   │   ├── multiface.py              # akurasi hitung, MAE, pemasangan posisi
 │   │   ├── distance_analysis.py      # regresi log-log, jarak optimal, ukuran minimum
 │   │   └── stats.py                  # Wilson, bootstrap per kelompok
 │   ├── experiments/
-│   │   ├── runner.py                 # snapshot config + versi
+│   │   ├── runner.py                 # snapshot config + versi, jalankan detektor, simpan deteksi
 │   │   ├── e1_distance_resolution.py
 │   │   ├── e2_multiface.py
 │   │   ├── e3_lighting.py
@@ -454,15 +456,15 @@ pcd-face-detection/
 │   │   └── plots.py                  # delapan grafik §10
 │   └── tools/
 │       ├── download_models.py
-│       ├── capture.py                # ← v1 + set/subjek/jarak/formasi + metadata
-│       ├── annotate.py               # ← v1
+│       ├── capture.py                # rekam per set/subjek/jarak/formasi + tulis metadata
+│       ├── annotate.py               # gambar kotak ground truth
 │       ├── crop.py
 │       ├── validate.py
-│       ├── demo_realtime.py          # ← v1 + detektor MediaPipe
+│       ├── demo_realtime.py          # demo webcam, ganti detektor saat berjalan
 │       └── forget.py
 ├── tests/
-│   ├── fixtures/v1_selftest_expected.json
-│   ├── test_regression_v1.py
+│   ├── test_config.py
+│   ├── test_dataset_tools.py         # metadata, validate, forget pada data sintetis
 │   ├── test_matching.py
 │   ├── test_operating_point.py
 │   ├── test_average_precision.py
@@ -487,14 +489,20 @@ pcd-face-detection/
 | `report` | Bangun ulang tabel dan grafik dari hasil tersimpan |
 | `demo --detector mp_short` | Demo realtime; tombol untuk ganti detektor saat berjalan |
 | `forget S03` | Hapus seluruh data satu subjek |
-| `selftest` | Uji jalur v1 + seluruh metrik tanpa webcam dan tanpa model |
+| `selftest` | Uji seluruh metrik dengan nilai acuan + jalur Haar/YCbCr/Fake pada citra sintetis, tanpa webcam dan tanpa model |
 
-### 12.2 Migrasi kode v1
+### 12.2 Keputusan implementasi (ditetapkan sebelum data diambil)
 
-1. Pindahkan modul sesuai tanda `←`; perilaku v1 **tidak boleh berubah** — `test_regression_v1.py` mengunci angka selftest v1, termasuk temuan `ycbcr + he` recall 0,333 dan F1 0,500.
-2. `DetectionResult` mendapat medan `scores` dengan nilai bawaan `None`.
-3. `haar.py` ditambah jalur `detectMultiScale3` dan parameter `equalize`. Jalur lama (`detectMultiScale`, `equalize=True`) tetap ada supaya uji regresi lulus.
-4. Teks ruang lingkup di v1 ("tanpa pengenalan identitas") **tetap benar** di v3 — tidak perlu direvisi.
+Keputusan berikut mengisi celah yang tidak ditentukan bagian lain. Semuanya dibaca dari `configs/experiment.yaml` dan dicatat di `config_snapshot.yaml` setiap run.
+
+1. **Enhancement `none` = citra mentah.** Tidak ada Gaussian blur atau operasi lain. `clahe` hanya pada kanal Y (YCrCb), `clip_limit` 2,0, *tile* 8×8.
+2. **Haar `equalize`.** E1, E2, dan E4 memakai nilai config (`true`, praktik umum OpenCV). E3 menguji `true` dan `false`. Nilai ini tidak boleh diubah setelah melihat hasil E3.
+3. **Dua jalur Haar.** Titik operasi memakai `detectMultiScale` dengan parameter config (tanpa skor). Run AP memakai `detectMultiScale3(outputRejectLevels=True)` dengan `minNeighbors=0`, lalu NMS pada skor yang sudah digeser (§5.1).
+4. **Cakupan metrik.** P/R/F1 dan AP dihitung pada citra berwajah. FPPI dilaporkan dua kali: pada set kosong saja, dan pada seluruh citra (berwajah + kosong).
+5. **Interval.** Proporsi → Wilson 95%. Karena frame dari subjek yang sama berkorelasi, recall per jarak juga diberi interval bootstrap per subjek. Perbandingan dua detektor memakai **bootstrap berpasangan atas selisih** (ΔF1, ΔAP, Δrecall) pada resampel subjek yang sama; "lebih baik" hanya bila interval selisihnya tidak memuat 0.
+6. **Jarak optimal** = jarak dengan estimasi titik recall ≥ `recall_target`; batas bawah Wilson ikut dilaporkan. **Ukuran wajah minimum** = batas bawah bin lebar wajah (dari kotak manual, kedua resolusi digabung) terkecil sehingga bin itu dan semua bin di atasnya punya recall ≥ `recall_target`. Bin piksel dan bin proporsi ada di config.
+7. **Metadata** ditambah kolom `subjects` (kode peserta kiri→kanan pada citra multi-wajah; dibutuhkan `forget`) dan `pose`. Izin publikasi disimpan di `data/subjects.csv` (kode + izin, tanpa nama).
+8. **Waktu deteksi** mencakup konversi warna yang dibutuhkan detektor (BGR→abu-abu+ekualisasi untuk Haar, BGR→RGBA+`mp.Image` untuk MediaPipe), tidak mencakup baca berkas maupun enhancement.
 
 ---
 
@@ -539,7 +547,7 @@ pytest>=8.0
 | Fase | Isi | Verifikasi |
 |---|---|---|
 | **0 — Lingkungan** | `.venv`, requirements, unduh model | OpenCV 4.x; berkas Haar ada; tiga `.tflite` terunduh dengan SHA-256 tercatat (atau full-range/sparse dicatat gagal); `FaceDetector` short-range berhasil dibuat dan dijalankan pada satu citra |
-| **1 — Restrukturisasi** | Paket `pcdface`, migrasi v1, `DetectionResult.scores`, CLI kerangka | `pytest` lulus termasuk regresi v1; `python -m pcdface selftest` lulus |
+| **1 — Kerangka paket** | Paket `pcdface` dari awal, `paths`, `config`, `DetectionResult`, preprocessing, matching, CLI kerangka | `pytest` lulus; `python -m pcdface selftest` lulus |
 | **2 — Alat data** | capture (semua set), metadata, annotate, crop, validate, forget | Metadata benar untuk tiap set; `validate` menangkap jumlah kotak ≠ `expected_faces` dan berkas yatim; `forget` menghapus tuntas termasuk citra multi-wajah |
 | **3 — Detektor & metrik** | haar (skor + equalize), mediapipe, fake, registry, seluruh modul evaluasi | Tes metrik lulus dengan nilai acuan hitungan tangan; tes kontrak detektor lulus; `pytest -m models` lulus |
 | **4 — Eksperimen** | E1–E4 (+E5), runner, perkecilan resolusi | `run all --synthetic` menghasilkan semua tabel §10 tanpa galat |
@@ -598,12 +606,19 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 
 ## Lampiran A — `configs/experiment.yaml`
 
+Salinan isi config pada saat PRD ini diperbarui. Bila berbeda, **berkas config yang berlaku**.
+
 ```yaml
+# Konfigurasi eksperimen — satu-satunya sumber faktor, level, ambang, dan seed.
+# Salinannya ditulis ke results/<eksperimen>/config_snapshot.yaml setiap run.
+# Keputusan yang ditetapkan sebelum data diambil: docs/PRD.md §12.2.
+
 seed: 42
 
-paths:
+paths:                               # relatif terhadap akar proyek
   raw: data/raw
   metadata: data/metadata.csv
+  subjects: data/subjects.csv
   annotations: data/annotations/boxes.json
   crops: data/crops
   models: models
@@ -612,11 +627,16 @@ paths:
 capture:
   width: 1280
   height: 720
+  camera_index: 0
 
 dataset:
+  sets: [jarak, cahaya, multi, kosong, pose]
   distances_cm: [50, 100, 150, 200, 250, 300]
   lightings: [normal, terang, redup, backlight]
-  reference_distance_cm: 100
+  poses: [kiri, kanan, menunduk, mendongak]
+  reference_distance_cm: 100         # jarak set cahaya dan pose
+  frames_per_condition: 5
+  empty_images: 20
   formations:                        # posisi kiri → kanan di citra
     F1: [100, 100]
     F2: [100, 100, 100]
@@ -625,29 +645,55 @@ dataset:
     F5: [80, 150, 250]
     F6: [80, 130, 200, 300]
 
+preprocessing:
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: [8, 8]
+
 detectors:
   haar:
+    type: haar
     scale_factor: 1.1
     min_neighbors: 5
     min_size: [30, 30]
-    equalize: true                   # E3 menguji true dan false
+    equalize: true                   # E3 menguji true dan false (PRD §12.2 butir 2)
   mp_short:
+    type: mediapipe
     model: blaze_face_short_range.tflite
     min_detection_confidence: 0.5
     min_suppression_threshold: 0.3
   mp_full:
+    type: mediapipe
     model: blaze_face_full_range.tflite
     min_detection_confidence: 0.5
     min_suppression_threshold: 0.3
-  ap_score_floor:                    # run ambang rendah untuk kurva PR (§8.2)
-    mp: 0.05
-    haar_min_neighbors: 0
-    haar_nms_iou: 0.3                # samakan dengan min_suppression_threshold MediaPipe
+  mp_sparse:                         # P1
+    type: mediapipe
+    model: blaze_face_full_range_sparse.tflite
+    min_detection_confidence: 0.5
+    min_suppression_threshold: 0.3
+  ycbcr:                             # P1 — Chai & Ngan (1999)
+    type: ycbcr
+    cb_range: [77, 127]
+    cr_range: [133, 173]
+    opening_kernel: 5
+    closing_kernel: 11
+    opening_iterations: 1
+    closing_iterations: 2
+    min_area_ratio: 0.002            # ≈ 43×43 px pada 1280×720
+    max_area_ratio: 0.5
+    aspect_range: [0.55, 1.30]       # lebar / tinggi
+    min_solidity: 0.45
 
 evaluation:
   iou_primary: 0.5
   iou_sensitivity: [0.3, 0.4]
   recall_target: 0.90
+  ap_run:                            # run ambang rendah untuk kurva PR (PRD §8.2)
+    mp_min_detection_confidence: 0.05
+    haar_min_neighbors: 0
+    haar_nms_iou: 0.3                # samakan dengan min_suppression_threshold MediaPipe
+  size_bins_px: [0, 20, 30, 40, 50, 60, 80, 100, 150, 250, 10000]
+  size_bins_ratio: [0, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15, 0.25, 1.0]
 
 experiments:
   e1:
@@ -664,9 +710,20 @@ experiments:
     resolutions: [[1280, 720], [640, 360]]
     warmup_runs: 1
     repeats: 100
-  e5_enabled: false
+    sample_images: 10                # citra per set, diambil acak dengan seed
+  e5:
+    enabled: false                   # P1
+    scale_factors: [1.05, 1.1, 1.2]
+    min_neighbors: [3, 5, 7]
 
 stats:
   ci_level: 0.95
   bootstrap_resamples: 1000
+
+synthetic:                           # hanya untuk --synthetic dan tes
+  subjects: 4
+  frames_per_condition: 2
+  empty_images: 6
+  focal_px: 1000.0                   # model lubang jarum: w_px = f × W / Z
+  face_width_cm: 15.0
 ```

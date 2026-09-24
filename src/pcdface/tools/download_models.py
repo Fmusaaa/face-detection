@@ -15,11 +15,11 @@ galat — berkas tidak ditimpa diam-diam kecuali memakai `--force`.
 URL diambil dari PRD §5.2. Bila salah satu gagal diunduh, galatnya dilaporkan
 apa adanya; skrip ini tidak mencari URL pengganti.
 
-Pemakaian (sementara, sebelum CLI `python -m pcdface` ada di Fase 1)
--------------------------------------------------------------------
-    python src/pcdface/tools/download_models.py
-    python src/pcdface/tools/download_models.py --only short_range
-    python src/pcdface/tools/download_models.py --force
+Pemakaian
+---------
+    python -m pcdface download-models
+    python -m pcdface download-models --only short_range
+    python -m pcdface download-models --force
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-# src/pcdface/tools/download_models.py -> akar proyek tiga tingkat di atas src/
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from pcdface.paths import PROJECT_ROOT
+
 DEFAULT_MODELS_DIR = PROJECT_ROOT / "models"
 CHECKSUM_FILE = "checksums.txt"
 
@@ -165,11 +165,8 @@ def fetch_model(
     return "terunduh"
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Unduh model MediaPipe Face Detector dan catat SHA-256-nya."
-    )
-    parser.add_argument("--models-dir", default=str(DEFAULT_MODELS_DIR), help="Folder model")
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--models-dir", default=None, help="Folder model (bawaan: paths.models di config)")
     parser.add_argument(
         "--only",
         choices=[spec.key for spec in MODELS],
@@ -179,12 +176,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force", action="store_true", help="Unduh ulang dan timpa checksum yang tercatat"
     )
-    return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    models_dir = Path(args.models_dir)
+def run(args: argparse.Namespace, models_dir: Path = DEFAULT_MODELS_DIR) -> int:
+    """Unduh model terpilih. Kode keluar 1 bila ada yang gagal."""
+    models_dir = Path(args.models_dir) if args.models_dir else models_dir
     models_dir.mkdir(parents=True, exist_ok=True)
 
     selected = [spec for spec in MODELS if not args.only or spec.key in args.only]
@@ -209,6 +205,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(failures)} model gagal: {', '.join(failures)}", file=sys.stderr)
         return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Unduh model MediaPipe Face Detector dan catat SHA-256-nya."
+    )
+    add_arguments(parser)
+    return run(parser.parse_args(argv))
 
 
 if __name__ == "__main__":

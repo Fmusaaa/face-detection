@@ -6,12 +6,12 @@ Konteks permanen untuk Claude Code. Spesifikasi lengkap ada di `docs/PRD.md` (v3
 
 Sistem **deteksi wajah saja** untuk UTS Pengolahan Citra Digital, sekaligus bahan jurnal. Membandingkan:
 
-- **OpenCV Haar Cascade** — metode klasik (Viola-Jones), dari kode v1
+- **OpenCV Haar Cascade** — metode klasik (Viola-Jones)
 - **MediaPipe BlazeFace** — model *short-range* dan *full-range*
 
 Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kinerja pada 2–4 wajah sekaligus (RQ2), pencahayaan dan CLAHE (RQ3), pengaruh resolusi (RQ4), kecepatan (RQ5).
 
-**Tidak ada pengenalan identitas.** Tidak ada DeepFace, TensorFlow, *embedding*, atau database wajah. Versi v2 yang memakai DeepFace sudah dibatalkan.
+**Tidak ada pengenalan identitas.** Tidak ada DeepFace, TensorFlow, *embedding*, atau database wajah. Versi v2 yang memakai DeepFace sudah dibatalkan. Kode v1 tidak dipakai — paket dibangun dari awal.
 
 ## Lingkungan
 
@@ -24,7 +24,7 @@ Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kin
 ## Perintah
 
 ```bash
-python -m pcdface selftest          # jalur v1 + metrik, tanpa webcam dan tanpa model
+python -m pcdface selftest          # metrik + jalur detektor sintetis, tanpa webcam dan tanpa model
 pytest                              # semua tes kecuali yang bertanda models
 pytest -m models                    # tes asap yang memanggil MediaPipe dengan berkas .tflite
 python -m pcdface validate          # konsistensi data, metadata, anotasi
@@ -38,7 +38,8 @@ python -m pcdface report            # bangun ulang tabel dan grafik
 ```
 src/pcdface/
   paths.py, config.py      path bawaan dari PROJECT_ROOT; configs/experiment.yaml
-  preprocessing.py         enhancement pada kanal Y (warisan v1)
+  preprocessing.py         enhancement pada kanal Y (none | clahe)
+  synthetic.py             dataset sintetis untuk --synthetic dan tes
   dataset/                 metadata.csv, versi resolusi 640×360
   detection/               base (DetectionResult), haar, mediapipe_detector, ycbcr, fake, registry
   evaluation/              matching, operating_point, average_precision, multiface, distance_analysis, stats
@@ -62,14 +63,14 @@ src/pcdface/
 3. **Memasang `opencv-python`**, atau `opencv-contrib-python` versi 5.
 4. **Meng-*commit* data wajah** — tidak ada berkas dari `data/` (kecuali `README.md`, `.gitkeep`), tidak ada citra dari `results/`, tidak ada `.tflite`.
 5. **Menulis nama asli subjek** di mana pun. Hanya ID `S01`, `S02`, ….
-6. **Mengubah perilaku kode v1.** `tests/test_regression_v1.py` harus selalu lulus.
+6. **Mengubah keputusan PRD §12.2 setelah melihat hasil eksperimen.** Keputusan itu ditetapkan sebelum data diambil.
 7. **Menurunkan metrik titik operasi dari run ambang rendah.** Titik operasi dan kurva PR berasal dari dua run terpisah (PRD §8.2).
 8. **Memberi skor negatif ke `cv2.dnn.NMSBoxes`.** Geser `levelWeights` Haar dengan mengurangkan nilai minimumnya dulu.
 9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah.
 
 ## Cara kerja
 
-- Satu fase PRD per sesi. Baca bagian PRD fase itu, susun rencana, tunggu persetujuan, baru menulis kode.
+- Baca bagian PRD fase yang dikerjakan, lalu langsung kerjakan. Keputusan yang tidak mendesak diambil sendiri dengan default yang masuk akal dan dicatat (PRD §12.2 atau laporan fase); bertanya hanya bila benar-benar memblokir atau berisiko (sudo, ganti versi paket yang dipatok, hapus data nyata).
 - Tes yang butuh berkas model diberi `@pytest.mark.models`; tes lain memakai `FakeDetector` dan citra sintetis.
 - Selesaikan fase dengan `pytest` dan perintah verifikasi fase itu (PRD §14), lalu laporkan hasilnya apa adanya, termasuk yang gagal.
 - *Commit* di akhir setiap fase dengan pesan yang menyebut nomor fase.
