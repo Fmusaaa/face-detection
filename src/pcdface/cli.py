@@ -53,13 +53,30 @@ def _no_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("rest", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
 
 
+def _tool(module: str) -> tuple[Callable[[argparse.ArgumentParser], None], Handler]:
+    """Perintah dari modul `pcdface.tools.<module>` yang punya add_arguments() dan run()."""
+
+    def load():
+        import importlib
+
+        return importlib.import_module(f"pcdface.tools.{module}")
+
+    def add_args(parser: argparse.ArgumentParser) -> None:
+        load().add_arguments(parser)
+
+    def handler(args: argparse.Namespace, cfg: Config) -> int:
+        return load().run(args, cfg)
+
+    return add_args, handler
+
+
 COMMANDS: list[tuple[str, str, Callable[[argparse.ArgumentParser], None], Handler]] = [
     ("download-models", "Unduh model .tflite, tulis dan verifikasi SHA-256", _download_models_args, _download_models),
-    ("capture", "Rekam foto dari webcam dan tulis metadata", _no_args, _pending(2)),
-    ("annotate", "Gambar kotak wajah manual (ground truth)", _no_args, _pending(2)),
-    ("crop", "Ekspor isi kotak manual ke data/crops/", _no_args, _pending(2)),
-    ("validate", "Periksa konsistensi data, metadata, dan anotasi", _no_args, _pending(2)),
-    ("forget", "Hapus seluruh data satu subjek", _no_args, _pending(2)),
+    ("capture", "Rekam foto dari webcam dan tulis metadata", *_tool("capture")),
+    ("annotate", "Gambar kotak wajah manual (ground truth)", *_tool("annotate")),
+    ("crop", "Ekspor isi kotak manual ke data/crops/", *_tool("crop")),
+    ("validate", "Periksa konsistensi data, metadata, dan anotasi", *_tool("validate")),
+    ("forget", "Hapus seluruh data satu subjek", *_tool("forget")),
     ("run", "Jalankan eksperimen e1..e5 atau all", _no_args, _pending(4)),
     ("report", "Bangun ulang tabel dan grafik dari hasil tersimpan", _no_args, _pending(5)),
     ("demo", "Demo deteksi realtime dari webcam", _no_args, _pending(5)),

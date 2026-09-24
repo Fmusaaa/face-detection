@@ -1,0 +1,215 @@
+"""Periksa konsistensi data, metadata, anotasi, dan persetujuan peserta.
+
+Dijalankan sebelum eksperimen. Galat (GALAT) membuat kode keluar 1;
+peringatan (PERINGATAN) — mis. citra belum dianotasi — tidak.
+
+Yang diperiksa:
+- setiap baris metadata punya berkas, nama berkas sesuai PRD §6.6, resolusi
+  sesuai config, dan nilai set/jarak/cahaya/formasi/pose valid
+- setiap peserta di foto terdaftar di subjects.csv dengan persetujuan penelitian
+- jumlah kotak anotasi = expected_faces, kotak berada di dalam citra
+- berkas yatim: foto tanpa metadata, anotasi tanpa metadata
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+import cv2
+
+from pcdface.config import Config
+from pcdface.dataset.annotations import load_annotations
+from pcdface.dataset.metadata import (
+    SUBJECT_ID,
+    CaptureSpec,
+    MetadataRow,
+    SubjectRow,
+    read_metadata,
+    read_subjects,
+)
+from pcdface.paths import ProjectPaths
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MIN_BOX_PX = 4
+
+ERROR = "GALAT"
+WARNING = "PERINGATAN"
+
+
+@dataclass
+class Issue:
+    level: str
+    where: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"[{self.level}] {self.where}: {self.message}"
+
+
+def _spec_of(row: MetadataRow) -> CaptureSpec:
+    return CaptureSpec(
+        set=row.set,
+        subject_id=row.subject_id,
+        distance_cm=row.distance_cm,
+        lighting=row.lighting,
+        pose=row.pose,
+        formation=row.formation,
+        subjects=row.subjects,
+    )
+
+
+def _check_row(row: MetadataRow, cfg: Config, subjects: dict[str, SubjectRow]) -> list[Issue]:
+    issues: list[Issue] = []
+
+    def error(message: str) -> None:
+        issues.append(Issue(ERROR, row.file, message))
+
+    ds = cfg.dataset
+    if row.set not in ds.sets:
+        error(f"set '{row.set}' tidak dikenal")
+        return issues
+    if (row.width, row.height) != (cfg.capture.width, cfg.capture.height):
+        error(f"resolusi metadata {row.width}×{row.height} ≠ {cfg.capture.width}×{cfg.capture.height}")
+    if row.lighting not in ds.lightings:
+        error(f"cahaya '{row.lighting}' tidak dikenal")
+
+    if row.set in ("jarak", "cahaya", "pose"):
+        if not SUBJECT_ID.match(row.subject_id):
+            error(f"subject_id '{row.subject_id}' harus seperti S01")
+        if row.subjects or row.formation or row.positions_cm:
+            error("set satu wajah tidak boleh punya subjects/formation/positions_cm")
+        if row.expected_faces != 1:
+            error(f"expected_faces {row.expected_faces}, seharusnya 1")
+        if row.set == "jarak":
+            if row.distance_cm not in ds.distances_cm:
+                error(f"jarak {row.distance_cm} cm bukan salah satu dari {list(ds.distances_cm)}")
+            if row.lighting != "normal":
+                error("set jarak harus cahaya normal (kondisi lain masuk set cahaya)")
+        else:
+            if row.distance_cm != ds.reference_distance_cm:
+                error(f"set {row.set} harus di jarak acuan {ds.reference_distance_cm} cm")
+        if row.set == "cahaya" and row.lighting == "normal":
+            error("cahaya normal diambil dari set jarak, bukan set cahaya")
+        if row.set == "pose" and row.pose not in ds.poses:
+            error(f"pose '{row.pose}' bukan salah satu dari {list(ds.poses)}")
+    elif row.set == "multi":
+        expected = ds.formations.get(row.formation)
+        if expected is None:
+            error(f"formasi '{row.formation}' tidak ada di config")
+        else:
+            if row.positions_cm != expected:
+                error(f"positions_cm {list(row.positions_cm)} ≠ formasi config {list(expected)}")
+            if row.expected_faces != len(expected):
+                error(f"expected_faces {row.expected_faces} ≠ {len(expected)} posisi")
+            if len(row.subjects) != len(expected):
+                error(f"subjects berisi {len(row.subjects)} kode, formasi punya {len(expected)} posisi")
+        if len(set(row.subjects)) != len(row.subjects):
+            error("kode peserta ganda di subjects")
+        if row.subject_id:
+            error("set multi memakai kolom subjects, bukan subject_id")
+    elif row.set == "kosong":
+        if row.expected_faces != 0 or row.people:
+            error("set kosong harus expected_faces 0 tanpa peserta")
+
+    for person in row.people:
+        subject = subjects.get(person)
+        if subject is None:
+            error(f"peserta {person} tidak terdaftar di subjects.csv")
+        elif not subject.consent_research:
+            error(f"peserta {person} tidak punya persetujuan penelitian — foto harus dihapus (forget {person})")
+
+    spec = _spec_of(row)
+    folder, prefix = spec.folder(), spec.stem_prefix()
+    name = Path(row.file)
+    if name.parent.as_posix() != folder or not name.stem.startswith(prefix + "_"):
+        error(f"nama berkas tidak sesuai metadata; seharusnya {folder}/{prefix}_NN.jpg")
+    return issues
+
+
+def _check_boxes(row: MetadataRow, boxes: list, image_size: tuple[int, int] | None) -> list[Issue]:
+    issues: list[Issue] = []
+    if len(boxes) != row.expected_faces:
+        issues.append(Issue(ERROR, row.file, f"{len(boxes)} kotak anotasi, expected_faces {row.expected_faces}"))
+    width, height = image_size or (row.width, row.height)
+    for index, (x, y, w, h) in enumerate(boxes, start=1):
+        if w < MIN_BOX_PX or h < MIN_BOX_PX:
+            issues.append(Issue(ERROR, row.file, f"kotak #{index} terlalu kecil ({w}×{h})"))
+        if x < 0 or y < 0 or x + w > width or y + h > height:
+            issues.append(Issue(ERROR, row.file, f"kotak #{index} keluar dari citra {width}×{height}"))
+    return issues
+
+
+def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True) -> tuple[list[Issue], dict[str, int]]:
+    """Kembalikan (daftar masalah, ringkasan jumlah citra per set)."""
+    issues: list[Issue] = []
+    try:
+        subjects = read_subjects(paths.subjects)
+        rows = read_metadata(paths.metadata)
+        annotations = load_annotations(paths.annotations)
+    except (ValueError, OSError) as error:
+        return [Issue(ERROR, "berkas data", str(error))], {}
+
+    counts = Counter(row.file for row in rows)
+    for file, count in counts.items():
+        if count > 1:
+            issues.append(Issue(ERROR, file, f"muncul {count} kali di metadata"))
+
+    for row in rows:
+        issues += _check_row(row, cfg, subjects)
+        path = paths.raw / row.file
+        size = None
+        if not path.exists():
+            issues.append(Issue(ERROR, row.file, "berkas foto tidak ada"))
+        elif check_images:
+            image = cv2.imread(str(path))
+            if image is None:
+                issues.append(Issue(ERROR, row.file, "berkas foto tidak bisa dibaca"))
+            else:
+                size = (image.shape[1], image.shape[0])
+                if size != (row.width, row.height):
+                    issues.append(Issue(ERROR, row.file, f"ukuran foto {size[0]}×{size[1]} ≠ metadata {row.width}×{row.height}"))
+        if row.file in annotations:
+            issues += _check_boxes(row, annotations[row.file], size)
+        else:
+            issues.append(Issue(WARNING, row.file, "belum dianotasi"))
+
+    known = set(counts)
+    if paths.raw.exists():
+        for path in sorted(paths.raw.rglob("*")):
+            if path.suffix.lower() in IMAGE_EXTENSIONS:
+                rel = path.relative_to(paths.raw).as_posix()
+                if rel not in known:
+                    issues.append(Issue(ERROR, rel, "foto yatim: ada di disk tetapi tidak ada di metadata"))
+    for key in sorted(set(annotations) - known):
+        issues.append(Issue(ERROR, key, "anotasi yatim: tidak ada di metadata"))
+
+    used = {person for row in rows for person in row.people}
+    for subject_id in sorted(set(subjects) - used):
+        issues.append(Issue(WARNING, subject_id, "terdaftar di subjects.csv tetapi belum punya foto"))
+
+    summary = dict(Counter(row.set for row in rows))
+    summary["dianotasi"] = sum(1 for row in rows if row.file in annotations)
+    summary["peserta"] = len(used)
+    return issues, summary
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--no-images", action="store_true", help="Lewati pembacaan berkas foto (lebih cepat)")
+    parser.add_argument("--quiet", action="store_true", help="Sembunyikan PERINGATAN, tampilkan GALAT saja")
+
+
+def run(args: argparse.Namespace, cfg: Config, paths: ProjectPaths | None = None) -> int:
+    paths = paths or cfg.paths
+    issues, summary = validate_dataset(cfg, paths, check_images=not args.no_images)
+    errors = [i for i in issues if i.level == ERROR]
+    warnings = [i for i in issues if i.level == WARNING]
+    for issue in errors + ([] if args.quiet else warnings):
+        print(issue)
+    if summary:
+        parts = ", ".join(f"{k} {v}" for k, v in sorted(summary.items()))
+        print(f"\nRingkasan: {parts}")
+    print(f"{len(errors)} galat, {len(warnings)} peringatan.")
+    return 1 if errors else 0
