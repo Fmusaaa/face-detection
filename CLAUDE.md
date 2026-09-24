@@ -65,7 +65,7 @@ src/pcdface/
 5. **Menulis nama asli subjek** di mana pun. Hanya ID `S01`, `S02`, ….
 6. **Mengubah keputusan PRD §12.2 setelah melihat hasil eksperimen.** Keputusan itu ditetapkan sebelum data diambil.
 7. **Menurunkan metrik titik operasi dari run ambang rendah.** Titik operasi dan kurva PR berasal dari dua run terpisah (PRD §8.2).
-8. **Memberi skor negatif ke `cv2.dnn.NMSBoxes`.** Geser `levelWeights` Haar dengan mengurangkan nilai minimumnya dulu.
+8. **Memberi skor ≤ 0 ke `cv2.dnn.NMSBoxes`.** Skor ≤ ambang dibuang diam-diam. Geser `levelWeights` Haar menjadi `skor − min + 1` (lihat `detection/haar.py::nms_with_shifted_scores`).
 9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah.
 
 ## Cara kerja

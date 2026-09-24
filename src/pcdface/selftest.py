@@ -95,10 +95,53 @@ def check_synthetic_dataset(cfg: Config, workdir: Path) -> str:
     return f"{len(rows)} citra ({summary}); kemiringan log-log {slope:.3f}"
 
 
+def check_metrics(_: Config, __: Path) -> str:
+    from pcdface.evaluation.average_precision import pr_curve
+    from pcdface.evaluation.distance_analysis import loglog_fit, min_face_size
+    from pcdface.evaluation.operating_point import aggregate, evaluate_image
+    from pcdface.evaluation.stats import wilson
+
+    ap = pr_curve(np.array([0.9, 0.8, 0.7, 0.6]), np.array([True, False, True, False]), 3).ap
+    assert _close(ap, 5 / 9), ap
+    est = wilson(8, 10)
+    assert _close(est.low, 0.4902, 1e-4) and _close(est.high, 0.9433, 1e-4), est
+    op = aggregate([evaluate_image("a", "g", [(0, 0, 10, 10), (50, 0, 10, 10)], [(0, 0, 10, 10), (200, 200, 5, 5)], 0.5)])
+    assert _close(op.f1, 0.5) and _close(op.fppi, 1.0), op
+    fit = loglog_fit([50, 100, 200, 300], [300, 150, 75, 50])
+    assert _close(fit.slope, -1.0, 1e-9), fit
+    assert min_face_size([10, 30, 50], [False, True, True], [0, 20, 40, 1000], 0.9).threshold == 20
+    return "AP 5/9, Wilson 8/10 [0,490; 0,943], F1 0,5, log-log −1, ukuran minimum"
+
+
+def check_detectors(cfg: Config, workdir: Path) -> str:
+    from pcdface.dataset.loader import load_samples
+    from pcdface.detection.haar import nms_with_shifted_scores
+    from pcdface.detection.registry import build_detector, supports_scores
+
+    assert nms_with_shifted_scores(np.array([[0, 0, 10, 10]]), np.array([-3.0]), 0.3).tolist() == [0], \
+        "NMS membuang kandidat tunggal berskor negatif"
+    paths = cfg.paths.with_data_root(workdir / "data")
+    samples = load_samples(paths, sets=("multi",)).samples[:3]
+    assert samples, "dataset sintetis belum dibuat"
+    parts = []
+    for name, synthetic in (("haar", False), ("ycbcr", False), ("haar", True), ("mp_short", True), ("mp_full", True)):
+        modes = ("operating", "ap") if supports_scores(name, cfg) else ("operating",)
+        for mode in modes:
+            with build_detector(name, cfg, mode=mode, synthetic=synthetic) as detector:
+                for sample in samples:
+                    result = detector.detect(sample.load())
+                    if detector.has_scores:
+                        assert result.scores is not None and len(result.scores) == len(result.boxes)
+        parts.append(f"{'fake:' if synthetic else ''}{name}")
+    return "kontrak DetectionResult OK untuk " + ", ".join(parts)
+
+
 CHECKS: list[tuple[str, Callable[[Config, Path], str]]] = [
     ("matching", check_matching),
     ("preprocessing", check_preprocessing),
+    ("metrik", check_metrics),
     ("dataset sintetis", check_synthetic_dataset),
+    ("detektor", check_detectors),
 ]
 
 
