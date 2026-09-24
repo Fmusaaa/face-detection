@@ -205,7 +205,8 @@ def run_experiments(
                 except ModuleNotFoundError:
                     ctx.log("grafik belum tersedia (Fase 5)")
                 else:
-                    ctx.log(f"{len(plot_experiment(name, out_dir))} grafik")
+                    figures = [p for p in plot_experiment(name, out_dir) if p.suffix == ".png"]
+                    ctx.log(f"{len(figures)} grafik (PNG 300 dpi + PDF)")
             write_snapshot(ctx, time.perf_counter() - start)
             ctx.log(f"selesai dalam {time.perf_counter() - start:.1f} detik, {len(ctx.tables)} tabel")
             outputs[name] = out_dir

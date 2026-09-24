@@ -44,7 +44,7 @@ src/pcdface/
   detection/               base (DetectionResult), haar, mediapipe_detector, ycbcr, fake, registry
   evaluation/              matching, operating_point, average_precision, multiface, distance_analysis, stats
   experiments/             e1..e5 + runner
-  reporting/               tabel dan grafik
+  reporting/               tables (CSV+MD), plots (8 grafik §10), report (RINGKASAN.md, contoh gambar terburam)
   tools/                   download_models, capture, annotate, crop, validate, demo_realtime, forget
 ```
 

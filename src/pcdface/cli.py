@@ -16,14 +16,6 @@ from pcdface.config import Config, ConfigError, load_config
 Handler = Callable[[argparse.Namespace, Config], int]
 
 
-def _pending(phase: int) -> Handler:
-    def handler(args: argparse.Namespace, cfg: Config) -> int:
-        print(f"'{args.command}' belum diimplementasi (Fase {phase}).", file=sys.stderr)
-        return 2
-
-    return handler
-
-
 # ---------------------------------------------------------------------------
 # Perintah
 # ---------------------------------------------------------------------------
@@ -47,10 +39,6 @@ def _selftest(args: argparse.Namespace, cfg: Config) -> int:
     from pcdface.selftest import run_selftest
 
     return run_selftest(cfg, verbose=args.verbose)
-
-
-def _no_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("rest", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
 
 
 def _tool(module: str) -> tuple[Callable[[argparse.ArgumentParser], None], Handler]:
@@ -78,8 +66,8 @@ COMMANDS: list[tuple[str, str, Callable[[argparse.ArgumentParser], None], Handle
     ("validate", "Periksa konsistensi data, metadata, dan anotasi", *_tool("validate")),
     ("forget", "Hapus seluruh data satu subjek", *_tool("forget")),
     ("run", "Jalankan eksperimen e1..e5 atau all", *_tool("pcdface.experiments.runner")),
-    ("report", "Bangun ulang tabel dan grafik dari hasil tersimpan", _no_args, _pending(5)),
-    ("demo", "Demo deteksi realtime dari webcam", _no_args, _pending(5)),
+    ("report", "Bangun ulang grafik dan RINGKASAN.md dari hasil tersimpan", *_tool("pcdface.reporting.report")),
+    ("demo", "Demo deteksi realtime dari webcam", *_tool("demo_realtime")),
     ("selftest", "Uji metrik dan jalur sintetis tanpa webcam/model", _selftest_args, _selftest),
 ]
 
