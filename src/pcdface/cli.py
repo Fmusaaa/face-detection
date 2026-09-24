@@ -54,12 +54,12 @@ def _no_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _tool(module: str) -> tuple[Callable[[argparse.ArgumentParser], None], Handler]:
-    """Perintah dari modul `pcdface.tools.<module>` yang punya add_arguments() dan run()."""
+    """Perintah dari modul yang punya add_arguments() dan run(). Nama pendek = pcdface.tools.<nama>."""
 
     def load():
         import importlib
 
-        return importlib.import_module(f"pcdface.tools.{module}")
+        return importlib.import_module(module if "." in module else f"pcdface.tools.{module}")
 
     def add_args(parser: argparse.ArgumentParser) -> None:
         load().add_arguments(parser)
@@ -77,7 +77,7 @@ COMMANDS: list[tuple[str, str, Callable[[argparse.ArgumentParser], None], Handle
     ("crop", "Ekspor isi kotak manual ke data/crops/", *_tool("crop")),
     ("validate", "Periksa konsistensi data, metadata, dan anotasi", *_tool("validate")),
     ("forget", "Hapus seluruh data satu subjek", *_tool("forget")),
-    ("run", "Jalankan eksperimen e1..e5 atau all", _no_args, _pending(4)),
+    ("run", "Jalankan eksperimen e1..e5 atau all", *_tool("pcdface.experiments.runner")),
     ("report", "Bangun ulang tabel dan grafik dari hasil tersimpan", _no_args, _pending(5)),
     ("demo", "Demo deteksi realtime dari webcam", _no_args, _pending(5)),
     ("selftest", "Uji metrik dan jalur sintetis tanpa webcam/model", _selftest_args, _selftest),
