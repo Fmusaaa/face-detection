@@ -1,4 +1,4 @@
-"""Delapan grafik minimum PRD §10 — PNG 300 dpi + PDF, dibangun dari CSV hasil.
+"""Grafik PRD §10 (8 grafik minimum + 2 grafik E6) — PNG 300 dpi + PDF, dibangun dari CSV hasil.
 
 Semua grafik hanya membaca tabel `.csv` di folder eksperimen, sehingga
 `python -m pcdface report` bisa membangunnya ulang tanpa menjalankan detektor.
@@ -347,6 +347,96 @@ def plot_speed(out_dir: Path) -> list[Path]:
     return _save(fig, out_dir, "grafik8_kecepatan")
 
 
+# ---------------------------------------------------------------------------
+# E6
+# ---------------------------------------------------------------------------
+def _dodged_points(ax: plt.Axes, x: np.ndarray, part: pd.DataFrame, name: str, offset: float, line: bool) -> None:
+    color, marker = _style(name)
+    recall = part["recall"].to_numpy(dtype=float)
+    errors = [recall - part["recall_low"].to_numpy(dtype=float), part["recall_high"].to_numpy(dtype=float) - recall]
+    ax.errorbar(x + offset, recall, yerr=errors, fmt=marker, color=color, ecolor=color, elinewidth=1.0,
+                capsize=2.5, markersize=6, label=_label(name))
+    if line:
+        ax.plot(x + offset, recall, color=color, linewidth=1.4, alpha=0.8)
+
+
+def plot_pose(out_dir: Path) -> list[Path]:
+    """Grafik 9: recall per pose — menoleh 0–90° bersambung, lalu mengangguk dan miring — per jarak."""
+    df = _read(out_dir, "e6_per_sumbu")
+    if df is None:
+        return []
+    detectors = list(dict.fromkeys(df["detektor"]))
+    distances = sorted(df["jarak_cm"].unique())
+    # posisi x: depan (0°), tiap sudut menoleh, lalu tiap sudut sumbu lain
+    slots: list[tuple[str, int]] = [("menoleh", 0)]
+    for axis in dict.fromkeys(df["sumbu"]):
+        slots += [(axis, int(a)) for a in sorted(df.loc[df["sumbu"] == axis, "sudut"].unique()) if a > 0]
+    names = {"mengangguk": "angguk", "miring": "miring"}
+    labels = ["depan"] + [f"{angle}°" if axis == "menoleh" else f"{names.get(axis, axis)}\n{angle}°"
+                          for axis, angle in slots[1:]]
+    n_yaw = sum(1 for axis, _ in slots if axis == "menoleh")
+    width = 0.6 / max(len(detectors), 1)
+    fig, axes = plt.subplots(1, len(distances), figsize=(0.55 * len(slots) * len(distances) + 2.4, 3.9),
+                             sharey=True, squeeze=False)
+    for ax, distance in zip(axes[0], distances):
+        for i, name in enumerate(detectors):
+            part = df[(df["detektor"] == name) & (df["jarak_cm"] == distance)]
+            rows = []
+            for axis, angle in slots:
+                match = part[(part["sudut"] == angle) & ((part["sumbu"] == axis) | (angle == 0))].head(1)
+                rows.append(match.iloc[0] if len(match) else pd.Series({"recall": np.nan, "recall_low": np.nan,
+                                                                        "recall_high": np.nan}))
+            frame = pd.DataFrame(rows)
+            offset = (i - (len(detectors) - 1) / 2) * width
+            x = np.arange(len(slots), dtype=float)
+            _dodged_points(ax, x[:n_yaw], frame.iloc[:n_yaw], name, offset, line=True)
+            if len(slots) > n_yaw:
+                color, marker = _style(name)
+                recall = frame["recall"].to_numpy(dtype=float)[n_yaw:]
+                low = frame["recall_low"].to_numpy(dtype=float)[n_yaw:]
+                high = frame["recall_high"].to_numpy(dtype=float)[n_yaw:]
+                ax.errorbar(x[n_yaw:] + offset, recall, yerr=[recall - low, high - recall], fmt=marker, color=color,
+                            ecolor=color, elinewidth=1.0, capsize=2.5, markersize=6)
+        if len(slots) > n_yaw:
+            ax.axvline(n_yaw - 0.5, color=AXIS, linewidth=1.0)
+        ax.set_xticks(range(len(slots)), labels)
+        if n_yaw > 1:
+            ax.annotate("menoleh (kiri + kanan)", xy=((n_yaw - 1) / 2 + 0.5, 0), xycoords=("data", "axes fraction"),
+                        xytext=(0, -34), textcoords="offset points", ha="center", va="top", fontsize=8.5, color=INK_2)
+        ax.set_title(f"{distance} cm", loc="left")
+        ax.grid(axis="x", visible=False)
+        _recall_axis(ax)
+        if ax is not axes[0][0]:
+            ax.set_ylabel("")
+    handles, legend_labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc="lower center", ncol=len(detectors), bbox_to_anchor=(0.5, -0.16))
+    fig.suptitle("Recall per pose kepala, galat = Wilson 95% (kiri dan kanan digabung)",
+
+                 x=0.01, y=1.03, ha="left", color=INK, fontsize=11.5)
+    return _save(fig, out_dir, "grafik9_recall_pose")
+
+
+def plot_expression(out_dir: Path) -> list[Path]:
+    """Grafik 10: recall per ekspresi wajah, galat Wilson."""
+    df = _read(out_dir, "e6_ekspresi")
+    if df is None:
+        return []
+    detectors = list(dict.fromkeys(df["detektor"]))
+    expressions = list(dict.fromkeys(df["ekspresi"]))
+    width = 0.6 / max(len(detectors), 1)
+    fig, ax = plt.subplots(figsize=(1.1 * len(expressions) + 2.2, 3.7))
+    x = np.arange(len(expressions), dtype=float)
+    for i, name in enumerate(detectors):
+        part = df[df["detektor"] == name].set_index("ekspresi").reindex(expressions)
+        _dodged_points(ax, x, part, name, (i - (len(detectors) - 1) / 2) * width, line=False)
+    ax.set_xticks(x, expressions)
+    ax.grid(axis="x", visible=False)
+    _recall_axis(ax)
+    ax.set_title("Recall per ekspresi (wajah menghadap kamera), galat = Wilson 95%", loc="left")
+    ax.legend(loc="lower left")
+    return _save(fig, out_dir, "grafik10_recall_ekspresi")
+
+
 PLOTTERS = {
     "e1": [plot_recall_vs_distance, plot_width_loglog, plot_recall_vs_size, plot_resolution_effect,
            lambda d: plot_pr_curves(d, "e1")],
@@ -354,7 +444,9 @@ PLOTTERS = {
     "e3": [plot_lighting_heatmap],
     "e4": [plot_speed],
     "e5": [],
+    "e6": [plot_pose, plot_expression],
 }
+
 
 
 def plot_experiment(name: str, out_dir: Path) -> list[Path]:

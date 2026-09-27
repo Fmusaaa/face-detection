@@ -28,15 +28,22 @@ python -m pcdface selftest
    nama asli — simpan di luar folder proyek.
 2. Isi `data/subjects.csv` — kode peserta dan izinnya saja, **tanpa nama** (lihat [`data/README.md`](data/README.md)).
 3. Matikan **Center Stage, Studio Light, Portrait** (Control Center → Video Effects saat kamera aktif).
-   Tempel lakban di lantai pada 50, 100, 150, 200, 250, 300 cm.
+   Tempel lakban di lantai pada 50, 100, 150, 200, 250, 300 cm, dan titik penanda toleh di dinding
+   setinggi mata (30° dan 60°, PRD §6.4).
 4. Rekam. Data boleh diambil di beberapa pertemuan — beri satu kode sesi per pertemuan dan rekam
-   **seluruh set jarak + cahaya seorang peserta dalam sesi yang sama** (PRD §6.2). Contoh untuk satu peserta:
+   **seluruh set jarak, cahaya, pose, dan ekspresi seorang peserta dalam sesi yang sama** (PRD §6.2).
+   Contoh untuk satu peserta (±35 menit):
 
 ```bash
 SESI=2026-10-01-sore
 for d in 50 100 150 200 250 300; do python -m pcdface capture --session $SESI --set jarak --subject S01 --distance $d; done
 for l in terang redup backlight; do python -m pcdface capture --session $SESI --set cahaya --subject S01 --lighting $l; done
+for d in 100 200; do python -m pcdface capture --session $SESI --set pose --subject S01 --distance $d --pose semua; done
+python -m pcdface capture --session $SESI --set ekspresi --subject S01 --expression semua
 ```
+
+   `--pose semua` dan `--expression semua` merekam semua level berurutan (3 frame per level);
+   instruksi pose/ekspresi berikutnya tampil di bagian atas layar. Kiri/kanan = kiri/kanan **peserta**.
 
    Multi-wajah — urutan `--subjects` adalah urutan **kiri → kanan di layar** (pratinjau tidak dicerminkan):
 
@@ -54,8 +61,9 @@ python -m pcdface capture --session $SESI --set kosong --count 20
 python -m pcdface annotate          # kotak manual: garis rambut → dagu, pipi → pipi, tanpa telinga
 python -m pcdface validate          # harus 0 galat sebelum eksperimen
 python -m pcdface crop              # ekspor crop + lebar wajah per jarak
-python -m pcdface run all           # E1–E4 (E5 bila experiments.e5.enabled)
-python -m pcdface report            # results/RINGKASAN.md + 8 grafik
+python -m pcdface run all           # E1–E4 dan E6 (E5 bila experiments.e5.enabled)
+python -m pcdface report            # results/RINGKASAN.md + 10 grafik
+
 python -m pcdface report --examples 4   # contoh gambar; wajah tanpa izin publikasi diburamkan
 python -m pcdface demo              # demo webcam; 1/2/3 atau d = ganti detektor
 ```

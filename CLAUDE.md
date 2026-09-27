@@ -9,7 +9,7 @@ Sistem **deteksi wajah saja** untuk UTS Pengolahan Citra Digital, sekaligus baha
 - **OpenCV Haar Cascade** — metode klasik (Viola-Jones)
 - **MediaPipe BlazeFace** — model *short-range* dan *full-range*
 
-Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kinerja pada 2–4 wajah sekaligus (RQ2), pencahayaan dan CLAHE (RQ3), pengaruh resolusi (RQ4), kecepatan (RQ5).
+Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kinerja pada 2–4 wajah sekaligus (RQ2), pencahayaan dan CLAHE (RQ3), pengaruh resolusi (RQ4), kecepatan (RQ5), dan titik lemah pose kepala serta ekspresi (RQ6).
 
 **Tidak ada pengenalan identitas.** Tidak ada DeepFace, TensorFlow, *embedding*, atau database wajah. Versi v2 yang memakai DeepFace sudah dibatalkan. Kode v1 tidak dipakai — paket dibangun dari awal.
 
@@ -43,8 +43,9 @@ src/pcdface/
   dataset/                 metadata.csv, versi resolusi 640×360
   detection/               base (DetectionResult), haar, mediapipe_detector, ycbcr, fake, registry
   evaluation/              matching, operating_point, average_precision, multiface, distance_analysis, stats
-  experiments/             e1..e5 + runner
-  reporting/               tables (CSV+MD), plots (8 grafik §10), report (RINGKASAN.md, contoh gambar terburam)
+  pose.py                  nama pose (depan, kiri30, menunduk30, …) → sumbu + sudut
+  experiments/             e1..e6 + runner
+  reporting/               tables (CSV+MD), plots (10 grafik §10), report (RINGKASAN.md, contoh gambar terburam)
   tools/                   download_models, capture, annotate, crop, validate, demo_realtime, forget
 ```
 
@@ -66,7 +67,8 @@ src/pcdface/
 6. **Mengubah keputusan PRD §12.2 setelah melihat hasil eksperimen.** Keputusan itu ditetapkan sebelum data diambil.
 7. **Menurunkan metrik titik operasi dari run ambang rendah.** Titik operasi dan kurva PR berasal dari dua run terpisah (PRD §8.2).
 8. **Memberi skor ≤ 0 ke `cv2.dnn.NMSBoxes`.** Skor ≤ ambang dibuang diam-diam. Geser `levelWeights` Haar menjadi `skor − min + 1` (lihat `detection/haar.py::nms_with_shifted_scores`).
-9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah.
+9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah. Set ekspresi (E6) hanyalah kondisi perekaman yang diperagakan peserta — sistem tidak pernah menebak ekspresi atau emosi.
+
 
 ## Cara kerja
 

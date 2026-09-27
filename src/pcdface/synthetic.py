@@ -33,6 +33,7 @@ from pcdface.dataset.metadata import (
     write_subjects,
 )
 from pcdface.paths import ProjectPaths
+from pcdface.pose import REFERENCE_POSE, parse_pose
 from pcdface.preprocessing import mean_luma
 
 # Warna kulit BGR — kromanya jatuh di dalam ambang Chai & Ngan (1999)
@@ -66,6 +67,7 @@ class FaceSpec:
     width: int
     tone: tuple[int, int, int]
     pose: str = ""
+    expression: str = ""
 
 
 def face_width_px(distance_cm: float, focal_px: float, face_width_cm: float) -> int:
@@ -73,10 +75,32 @@ def face_width_px(distance_cm: float, focal_px: float, face_width_cm: float) -> 
     return max(4, int(round(focal_px * face_width_cm / distance_cm)))
 
 
+def _pose_geometry(pose: str, w: int, h: int) -> tuple[float, float, float, float]:
+    """(faktor lebar tampak, geser fitur x, geser fitur y, beda tinggi mata) untuk pose sintetis.
+
+    Menoleh menyempitkan wajah tampak (≈ 0,55 + 0,45·cos θ) dan menggeser fitur ke arah
+    toleh; kiri peserta tampak di kanan citra karena citra tidak dicerminkan.
+    """
+    info = parse_pose(pose or REFERENCE_POSE)
+    t = np.radians(info.angle)
+    if info.axis == "menoleh":
+        sign = 1.0 if info.direction == "kiri" else -1.0
+        return 0.55 + 0.45 * float(np.cos(t)), sign * 0.2 * float(np.sin(t)) * w, 0.0, 0.0
+    if info.axis == "mengangguk":
+        sign = 1.0 if info.direction == "menunduk" else -1.0
+        return 1.0, 0.0, sign * 0.16 * float(np.sin(t)) * h, 0.0
+    if info.axis == "miring":
+        sign = 1.0 if info.direction == "miringkiri" else -1.0
+        return 1.0, 0.0, 0.0, sign * 0.3 * float(np.sin(t)) * h
+    return 1.0, 0.0, 0.0, 0.0
+
+
 def _draw_person(canvas: np.ndarray, mask: np.ndarray, face: FaceSpec) -> Box:
     """Gambar kepala + leher + bahu. Kembalikan kotak manual (garis rambut – dagu)."""
-    cx, cy, w = face.center_x, face.center_y, face.width
-    h = int(round(w * FACE_ASPECT))
+    cx, cy = face.center_x, face.center_y
+    h = int(round(face.width * FACE_ASPECT))
+    width_factor, dx, dy, eye_tilt = _pose_geometry(face.pose, face.width, h)
+    w = max(4, int(round(face.width * width_factor)))
     half_w, half_h = w // 2, h // 2
     top = cy - half_h
 
@@ -94,23 +118,30 @@ def _draw_person(canvas: np.ndarray, mask: np.ndarray, face: FaceSpec) -> Box:
     fill_ellipse((cx, top + int(0.12 * h)), (int(0.56 * w), int(0.3 * h)), HAIR_BGR)
     fill_ellipse((cx, cy), (half_w, half_h), face.tone)
 
-    # posisi fitur bergeser untuk pose
-    dx = {"kiri": -0.12, "kanan": 0.12}.get(face.pose, 0.0) * w
-    dy = {"menunduk": 0.08, "mendongak": -0.08}.get(face.pose, 0.0) * h
-    eye_y = int(cy - 0.08 * h + dy)
+    # posisi fitur bergeser untuk pose; ekspresi mengubah alis dan mulut
     eye_dx = int(0.2 * w)
     eye_axes = (max(int(0.08 * w), 1), max(int(0.04 * w), 1))
     dark = tuple(int(c * 0.35) for c in face.tone)
+    brow = {"marah": 0.03, "kaget": -0.03}.get(face.expression, 0.0) * h
     for sign in (-1, 1):
         ex = int(cx + sign * eye_dx + dx)
+        eye_y = int(cy - 0.08 * h + dy + sign * eye_tilt / 2)
         cv2.ellipse(canvas, (ex, eye_y), eye_axes, 0, 0, 360, (30, 30, 30), -1, cv2.LINE_AA)
-        cv2.line(canvas, (ex - eye_axes[0], eye_y - int(0.07 * h)), (ex + eye_axes[0], eye_y - int(0.08 * h)),
+        inner = int(brow * 1.5) if face.expression == "marah" else int(brow)
+        cv2.line(canvas, (ex - sign * eye_axes[0], eye_y - int(0.07 * h + brow)),
+                 (ex + sign * eye_axes[0], eye_y - int(0.08 * h + brow) + inner),
                  HAIR_BGR, max(1, w // 30), cv2.LINE_AA)
     nose_top = (int(cx + dx), int(cy - 0.02 * h + dy))
     nose_bottom = (int(cx + dx * 1.3), int(cy + 0.12 * h + dy))
     cv2.line(canvas, nose_top, nose_bottom, dark, max(1, w // 40), cv2.LINE_AA)
-    cv2.ellipse(canvas, (int(cx + dx), int(cy + 0.27 * h + dy)), (max(int(0.18 * w), 1), max(int(0.035 * h), 1)),
-                0, 0, 180, (45, 45, 110), -1, cv2.LINE_AA)
+    mouth = (int(cx + dx), int(cy + 0.27 * h + dy))
+    if face.expression == "kaget":
+        cv2.ellipse(canvas, mouth, (max(int(0.1 * w), 1), max(int(0.07 * h), 1)), 0, 0, 360, (40, 30, 70), -1, cv2.LINE_AA)
+    else:
+        scale = 1.4 if face.expression == "senyum" else 1.0
+        start, end = (180, 360) if face.expression == "marah" else (0, 180)
+        cv2.ellipse(canvas, mouth, (max(int(0.18 * w * scale), 1), max(int(0.035 * h * scale), 1)),
+                    0, start, end, (45, 45, 110), -1, cv2.LINE_AA)
     return (cx - half_w, top, w, h)
 
 
@@ -174,6 +205,7 @@ def _row(spec: CaptureSpec, rel: str, image: np.ndarray, expected: int,
         distance_cm=spec.distance_cm,
         lighting=spec.lighting,
         pose=spec.pose,
+        expression=spec.expression,
         expected_faces=expected,
         luma_mean=mean_luma(image),
         width=image.shape[1],
@@ -208,7 +240,7 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
         rows.append(_row(spec, rel, image, len(boxes), positions))
         annotations[rel] = boxes
 
-    def single_face(sid: str, distance: int, pose: str = "") -> FaceSpec:
+    def single_face(sid: str, distance: int, pose: str = "", expression: str = "") -> FaceSpec:
         w = face_width_px(distance * float(rng.uniform(0.97, 1.03)), syn.focal_px, syn.face_width_cm)
         return FaceSpec(
             center_x=int(width / 2 + rng.integers(-60, 61)),
@@ -216,6 +248,7 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
             width=w,
             tone=tones[sid],
             pose=pose,
+            expression=expression,
         )
 
     for sid in subject_ids:
@@ -231,10 +264,18 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
             for index in range(1, syn.frames_per_condition + 1):
                 image, boxes = render_scene(width, height, [single_face(sid, ds.reference_distance_cm)], lighting, rng)
                 save(spec, index, image, boxes)
-        for pose in ds.poses:
-            spec = CaptureSpec(set="pose", subject_id=sid, distance_cm=ds.reference_distance_cm, pose=pose)
-            image, boxes = render_scene(width, height, [single_face(sid, ds.reference_distance_cm, pose)], "normal", rng)
+        # set pose dan ekspresi: satu frame per kondisi supaya dataset sintetis tetap kecil
+        for distance in ds.pose_distances_cm:
+            for pose in ds.poses:
+                spec = CaptureSpec(set="pose", subject_id=sid, distance_cm=distance, pose=pose)
+                image, boxes = render_scene(width, height, [single_face(sid, distance, pose)], "normal", rng)
+                save(spec, 1, image, boxes)
+        for expression in ds.expressions:
+            spec = CaptureSpec(set="ekspresi", subject_id=sid, distance_cm=ds.reference_distance_cm, expression=expression)
+            image, boxes = render_scene(width, height, [single_face(sid, ds.reference_distance_cm, expression=expression)],
+                                        "normal", rng)
             save(spec, 1, image, boxes)
+
 
     rotation = 0
     for formation, positions in ds.formations.items():

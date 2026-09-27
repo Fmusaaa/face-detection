@@ -22,7 +22,9 @@ from pathlib import Path
 from pcdface.config import Config
 from pcdface.dataset.annotations import load_annotations, save_annotations
 from pcdface.dataset.metadata import (
+    SINGLE_FACE_SETS,
     SUBJECT_ID,
+
     read_metadata,
     read_subjects,
     write_metadata,
@@ -60,7 +62,8 @@ def plan_forget(paths: ProjectPaths, subject_id: str) -> ForgetPlan:
     rows = read_metadata(paths.metadata)
     plan.photos = [row.file for row in rows if subject_id in row.people]
     # foto di folder subjek yang tidak tercatat di metadata tetap ikut dihapus
-    for set_name in ("jarak", "cahaya", "pose"):
+    for set_name in SINGLE_FACE_SETS:
+
         folder = paths.raw / set_name / subject_id
         if folder.exists():
             for path in sorted(folder.glob("*")):

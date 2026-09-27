@@ -15,13 +15,17 @@ EXPECTED_TABLES = {
     "e3": ["e3_f1", "e3_ringkasan", "e3_luminansi", "e3_efek_clahe", "e3_perbandingan"],
     "e4": ["e4_kecepatan"],
     "e5": ["e5_sensitivitas_haar"],
+    "e6": ["e6_ringkasan", "e6_pose", "e6_per_sumbu", "e6_batas_sudut", "e6_pose_vs_depan", "e6_ekspresi",
+           "e6_ekspresi_vs_netral", "e6_perbandingan"],
 }
 
 
 @pytest.fixture(scope="module")
 def outputs(small_cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("results")
-    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5"], synthetic=True, results_root=root, plots=False)
+    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5", "e6"], synthetic=True, results_root=root,
+                           plots=False)
+
 
 
 @pytest.mark.parametrize("name", list(EXPECTED_TABLES))

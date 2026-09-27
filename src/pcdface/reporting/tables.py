@@ -17,8 +17,9 @@ DECIMALS = 3
 
 
 def _fmt_number(value: Any, decimals: int = DECIMALS) -> str:
-    if value is None:
+    if value is None or value is pd.NA:
         return "–"
+
     if isinstance(value, bool):
         return "ya" if value else "tidak"
     if isinstance(value, int):

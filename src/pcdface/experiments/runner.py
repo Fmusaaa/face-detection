@@ -46,6 +46,7 @@ EXPERIMENTS: dict[str, str] = {
     "e3": "pcdface.experiments.e3_lighting",
     "e4": "pcdface.experiments.e4_speed",
     "e5": "pcdface.experiments.e5_sensitivity",
+    "e6": "pcdface.experiments.e6_pose_expression",
 }
 
 
@@ -149,7 +150,7 @@ def _selected(names: list[str], cfg: Config) -> list[str]:
         chosen = ["e1", "e2", "e3", "e4"]
         if cfg.experiments.e5.enabled:
             chosen.append("e5")
-        return chosen
+        return chosen + ["e6"]
     unknown = [n for n in names if n not in EXPERIMENTS]
     if unknown:
         raise ExperimentError(f"eksperimen tidak dikenal: {unknown}. Pilihan: {list(EXPERIMENTS)} atau all")
@@ -216,7 +217,8 @@ def run_experiments(
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("experiments", nargs="+", help="e1 e2 e3 e4 e5 atau all")
+    parser.add_argument("experiments", nargs="+", help="e1 e2 e3 e4 e5 e6 atau all")
+
     parser.add_argument("--synthetic", action="store_true", help="Pakai citra sintetis + FakeDetector (uji jalur)")
     parser.add_argument("--skip-validate", action="store_true", help="Jangan hentikan run bila validate menemukan galat")
     parser.add_argument("--no-plots", action="store_true", help="Tabel saja, tanpa grafik")

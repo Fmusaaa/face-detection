@@ -19,13 +19,19 @@ capture:
   camera_index: 0
 
 dataset:
-  sets: [jarak, cahaya, multi, kosong, pose]
+  sets: [jarak, cahaya, multi, kosong, pose, ekspresi]
   distances_cm: [50, 100, 150, 200, 250, 300]
   lightings: [normal, terang, redup, backlight]
-  poses: [kiri, kanan, menunduk, mendongak]
-  reference_distance_cm: 100         # jarak set cahaya dan pose
+  reference_distance_cm: 100         # jarak set cahaya dan ekspresi; kondisi normal E3
   frames_per_condition: 5
   empty_images: 20
+  # E6 — pose dan ekspresi (PRD §6.4, §9). Nama pose: depan | kiri30 | kanan60 | menunduk30 |
+  # mendongak30 | miringkiri30 | ... (kiri/kanan menurut peserta). 'depan' dan 'netral' = acuan.
+  poses: [depan, kiri30, kanan30, kiri60, kanan60, kiri90, kanan90,
+          menunduk30, mendongak30, miringkiri30, miringkanan30]
+  pose_distances_cm: [100, 200]
+  expressions: [netral, senyum, marah, kaget]
+  pose_frames_per_condition: 3       # set pose dan ekspresi
   formations:                        # posisi kiri → kanan di citra
     F1: [100, 100]
     F2: [100, 100, 100]
@@ -104,8 +110,11 @@ experiments:
     enabled: false                   # P1
     scale_factors: [1.05, 1.1, 1.2]
     min_neighbors: [3, 5, 7]
+  e6:
+    detectors: [haar, mp_short, mp_full]
 
 stats:
+
   ci_level: 0.95
   bootstrap_resamples: 1000
 

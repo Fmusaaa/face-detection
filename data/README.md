@@ -30,7 +30,8 @@ data/
 └── raw/
     ├── jarak/S01/jarak_S01_150cm_normal_04.jpg
     ├── cahaya/S01/cahaya_S01_100cm_redup_02.jpg
-    ├── pose/S01/…                                    (P1)
+    ├── pose/S01/pose_S01_200cm_kiri60_01.jpg
+    ├── ekspresi/S01/ekspresi_S01_100cm_marah_03.jpg
     ├── multi/F5/multi_F5_03.jpg
     └── kosong/kosong_07.jpg
 ```
@@ -59,12 +60,16 @@ S02,ya,ya,2026-09-30
 
 ## `metadata.csv` — diisi otomatis
 
-Kolom mengikuti PRD §6.6, ditambah tiga kolom:
+Kolom mengikuti PRD §6.6, ditambah empat kolom:
 
 - `session` — kode sesi pengambilan (`capture --session`, bawaan tanggal hari itu). Data boleh
   diambil di beberapa pertemuan; aturannya di PRD §6.2.
 - `subjects` — kode peserta pada foto multi-wajah, urut **kiri → kanan di
   citra** (mis. `S02;S05;S01`), sama urutannya dengan `positions_cm`. Dibutuhkan
   `forget` untuk menemukan foto multi-wajah yang memuat seorang peserta.
-- `pose` — `frontal`, `kiri`, `kanan`, `menunduk`, `mendongak` untuk set pose
-  (P1); kosong untuk set lain.
+- `pose` — untuk set pose: `depan`, `kiri30`, `kanan60`, `kiri90`, `menunduk30`,
+  `mendongak30`, `miringkiri30`, … (kiri/kanan menurut peserta; daftar lengkap di
+  `configs/experiment.yaml`); kosong untuk set lain.
+- `expression` — untuk set ekspresi: `netral`, `senyum`, `marah`, `kaget`; kosong
+  untuk set lain. Ekspresi hanya kondisi yang diperagakan, tidak ditebak sistem.
+

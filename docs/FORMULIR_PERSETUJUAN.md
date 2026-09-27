@@ -9,17 +9,18 @@
 
 ## 1. Tujuan
 
-Foto Anda akan dipakai untuk menguji seberapa baik dua program komputer menemukan **letak** wajah di dalam gambar pada berbagai jarak, kondisi cahaya, dan jumlah orang. Hasilnya dipakai untuk laporan tugas UTS dan, bila Anda menyetujui bagian 6, untuk artikel jurnal ilmiah.
+Foto Anda akan dipakai untuk menguji seberapa baik dua program komputer menemukan **letak** wajah di dalam gambar pada berbagai jarak, kondisi cahaya, arah hadap kepala, ekspresi, dan jumlah orang. Hasilnya dipakai untuk laporan tugas UTS dan, bila Anda menyetujui bagian 6, untuk artikel jurnal ilmiah.
 
 Sistem ini **tidak mengenali siapa Anda**. Ia hanya menandai kotak di sekitar wajah, tanpa mencocokkan wajah dengan nama atau data apa pun. Sistem juga tidak menebak usia, jenis kelamin, emosi, suku, atau ras.
 
 ## 2. Data yang diambil
 
-- Sekitar 45 foto wajah Anda sendirian melalui webcam laptop, pada jarak 0,5–3 meter dan beberapa kondisi cahaya.
+- Sekitar 125 foto wajah Anda sendirian melalui webcam laptop, pada jarak 0,5–3 meter, beberapa kondisi cahaya, beberapa arah hadap kepala (menoleh hingga ke samping, menunduk, mendongak, memiringkan kepala), dan beberapa ekspresi yang Anda peragakan (netral, senyum, marah, kaget). Ekspresi hanya diminta sebagai variasi gambar; sistem tidak menilai atau menebak ekspresi dan emosi Anda.
 - Beberapa foto bersama anggota kelompok lain (2–4 orang dalam satu foto).
 - Kotak lokasi wajah yang digambar secara manual pada foto-foto tersebut.
 
-Pengambilan foto dilakukan dalam satu atau beberapa pertemuan, sekitar 20 menit per orang ditambah sesi foto bersama.
+Pengambilan foto dilakukan dalam satu atau beberapa pertemuan, sekitar 35 menit per orang ditambah sesi foto bersama.
+
 
 Foto wajah termasuk data pribadi. Undang-Undang No. 27 Tahun 2022 tentang Pelindungan Data Pribadi, Pasal 4 ayat (2), menggolongkan data biometrik sebagai data pribadi yang bersifat spesifik.
 

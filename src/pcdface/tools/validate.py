@@ -23,6 +23,7 @@ import cv2
 from pcdface.config import Config
 from pcdface.dataset.annotations import load_annotations
 from pcdface.dataset.metadata import (
+    SINGLE_FACE_SETS,
     SUBJECT_ID,
     CaptureSpec,
     MetadataRow,
@@ -31,6 +32,7 @@ from pcdface.dataset.metadata import (
     read_subjects,
 )
 from pcdface.paths import ProjectPaths
+from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_POSE
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MIN_BOX_PX = 4
@@ -58,6 +60,7 @@ def _spec_of(row: MetadataRow) -> CaptureSpec:
         pose=row.pose,
         formation=row.formation,
         subjects=row.subjects,
+        expression=row.expression,
     )
 
 
@@ -76,7 +79,12 @@ def _check_row(row: MetadataRow, cfg: Config, subjects: dict[str, SubjectRow]) -
     if row.lighting not in ds.lightings:
         error(f"cahaya '{row.lighting}' tidak dikenal")
 
-    if row.set in ("jarak", "cahaya", "pose"):
+    if row.pose and row.set != "pose":
+        error("kolom pose hanya untuk set pose")
+    if row.expression and row.set != "ekspresi":
+        error("kolom expression hanya untuk set ekspresi")
+
+    if row.set in SINGLE_FACE_SETS:
         if not SUBJECT_ID.match(row.subject_id):
             error(f"subject_id '{row.subject_id}' harus seperti S01")
         if row.subjects or row.formation or row.positions_cm:
@@ -88,13 +96,19 @@ def _check_row(row: MetadataRow, cfg: Config, subjects: dict[str, SubjectRow]) -
                 error(f"jarak {row.distance_cm} cm bukan salah satu dari {list(ds.distances_cm)}")
             if row.lighting != "normal":
                 error("set jarak harus cahaya normal (kondisi lain masuk set cahaya)")
-        else:
-            if row.distance_cm != ds.reference_distance_cm:
-                error(f"set {row.set} harus di jarak acuan {ds.reference_distance_cm} cm")
+        elif row.set == "pose":
+            if row.distance_cm not in ds.pose_distances_cm:
+                error(f"set pose harus di salah satu jarak {list(ds.pose_distances_cm)} cm")
+        elif row.distance_cm != ds.reference_distance_cm:
+            error(f"set {row.set} harus di jarak acuan {ds.reference_distance_cm} cm")
         if row.set == "cahaya" and row.lighting == "normal":
             error("cahaya normal diambil dari set jarak, bukan set cahaya")
+        if row.set in ("pose", "ekspresi") and row.lighting != "normal":
+            error(f"set {row.set} harus cahaya normal")
         if row.set == "pose" and row.pose not in ds.poses:
             error(f"pose '{row.pose}' bukan salah satu dari {list(ds.poses)}")
+        if row.set == "ekspresi" and row.expression not in ds.expressions:
+            error(f"ekspresi '{row.expression}' bukan salah satu dari {list(ds.expressions)}")
     elif row.set == "multi":
         expected = ds.formations.get(row.formation)
         if expected is None:
@@ -142,6 +156,27 @@ def _check_boxes(row: MetadataRow, boxes: list, image_size: tuple[int, int] | No
     return issues
 
 
+def _reference_checks(rows: list[MetadataRow]) -> list[Issue]:
+    """E6 membandingkan tiap pose/ekspresi dengan acuan peserta yang sama — acuannya harus ada."""
+    issues: list[Issue] = []
+    poses: dict[tuple[str, int | None], set[str]] = {}
+    expressions: dict[str, set[str]] = {}
+    for row in rows:
+        if row.set == "pose":
+            poses.setdefault((row.subject_id, row.distance_cm), set()).add(row.pose)
+        elif row.set == "ekspresi":
+            expressions.setdefault(row.subject_id, set()).add(row.expression)
+    for (subject_id, distance), found in sorted(poses.items(), key=lambda item: (item[0][0], item[0][1] or 0)):
+        if REFERENCE_POSE not in found:
+            issues.append(Issue(WARNING, subject_id, f"set pose {distance} cm tanpa pose '{REFERENCE_POSE}' — "
+                                                     "perbandingan terhadap acuan E6 tidak bisa dihitung"))
+    for subject_id, found in sorted(expressions.items()):
+        if REFERENCE_EXPRESSION not in found:
+            issues.append(Issue(WARNING, subject_id, f"set ekspresi tanpa '{REFERENCE_EXPRESSION}' — "
+                                                     "perbandingan terhadap acuan E6 tidak bisa dihitung"))
+    return issues
+
+
 NORMAL_LUMA_SPREAD = 25.0  # selisih rerata Y "normal" antar sesi yang dianggap mencurigakan
 
 
@@ -171,6 +206,12 @@ def _session_checks(rows: list[MetadataRow], reference_cm: int) -> list[Issue]:
             issues.append(Issue(WARNING, subject_id,
                                 f"set jarak terpecah di sesi {sorted(distance_sessions)} — pastikan posisi kamera dan "
                                 "tanda lakban identik (periksa e1_loglog_per_sesi)"))
+        for set_name in ("pose", "ekspresi"):
+            set_sessions = {r.session for r in own if r.set == set_name}
+            if len(set_sessions) > 1:
+                issues.append(Issue(WARNING, subject_id,
+                                    f"set {set_name} terpecah di sesi {sorted(set_sessions)} — acuan "
+                                    f"({REFERENCE_POSE}/{REFERENCE_EXPRESSION}) sebaiknya satu sesi dengan kondisi lain"))
 
     luma: dict[str, list[float]] = {}
     for row in rows:
@@ -232,6 +273,8 @@ def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True
         issues.append(Issue(ERROR, key, "anotasi yatim: tidak ada di metadata"))
 
     issues += _session_checks(rows, cfg.dataset.reference_distance_cm)
+    issues += _reference_checks(rows)
+
 
     used = {person for row in rows for person in row.people}
     for subject_id in sorted(set(subjects) - used):

@@ -5,7 +5,8 @@ Alur tiap eksperimen:
    perkecilan) dan simpan kotak, skor, waktu per citra.
 2. `OperatingSummary` / `APSummary` — metrik titik operasi dan AP dari
    catatan itu, dengan Wilson untuk proporsi dan bootstrap kelompok untuk F1/AP.
-3. `paired` — selisih dua catatan pada citra yang sama (bootstrap berpasangan).
+3. `paired` — selisih dua catatan pada citra yang sama (bootstrap berpasangan);
+   `paired_conditions` — selisih dua kondisi (citra berbeda) pada peserta yang sama.
 
 Kelompok bootstrap diambil dari `MetadataRow.group`: kode subjek untuk set satu
 wajah, nama berkas untuk multi-wajah dan kosong (PRD §8.6).
@@ -52,6 +53,8 @@ class Record:
     positions_cm: tuple[int, ...] = ()
     luma_mean: float | None = None
     session: str = ""
+    pose: str = ""
+    expression: str = ""
     labels: dict[str, str] = field(default_factory=dict)  # detektor, mode, resolusi, enhancement
 
     def to_json(self) -> str:
@@ -81,6 +84,7 @@ def run_records(
             elapsed_ms=result.elapsed_ms, width=image.shape[1], height=image.shape[0],
             distance_cm=meta.distance_cm, lighting=meta.lighting, formation=meta.formation,
             positions_cm=tuple(meta.positions_cm), luma_mean=meta.luma_mean, session=meta.session,
+            pose=meta.pose, expression=meta.expression,
             labels=dict(labels or {}),
         ))
     return records
@@ -248,7 +252,29 @@ def paired(
     return paired_difference(groups, stat_a, stat_b, cfg.stats.bootstrap_resamples, cfg.stats.ci_level, cfg.seed)
 
 
+def paired_conditions(
+    records_a: Sequence[Record],
+    records_b: Sequence[Record],
+    iou: float,
+    cfg: Config,
+    metric: str = "recall",
+) -> Estimate:
+    """Selisih metrik kondisi A − kondisi B untuk detektor yang sama.
+
+    Citranya berbeda (mis. pose kiri60 vs depan), jadi pasangannya adalah
+    **kelompok** (peserta): hanya peserta yang punya kedua kondisi yang dipakai,
+    dan setiap resampel bootstrap memilih peserta yang sama untuk A dan B.
+    """
+    a, b = GroupedCounts(evaluate(records_a, iou)), GroupedCounts(evaluate(records_b, iou))
+    groups = sorted(set(a.groups) & set(b.groups))
+    if not groups:
+        return NAN_ESTIMATE
+    return paired_difference(groups, getattr(a, metric), getattr(b, metric),
+                             cfg.stats.bootstrap_resamples, cfg.stats.ci_level, cfg.seed)
+
+
 def verdict(estimate: Estimate) -> str:
+
     """Kalimat kesimpulan menurut aturan PRD §8.6 / §12.2 butir 5."""
     if math.isnan(estimate.low):
         return "tidak dapat dihitung"

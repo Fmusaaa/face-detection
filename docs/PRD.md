@@ -1,7 +1,7 @@
 # PRD — Sistem Deteksi Wajah: OpenCV vs MediaPipe
 
 **Proyek:** UTS Pengolahan Citra Digital (+ bahan jurnal)
-**Versi:** 3.1 — 24 September 2026 (temuan Fase 0: MediaPipe via delegate Metal + `SRGBA`)
+**Versi:** 3.2 — 27 September 2026 (tambah E6: pose kepala dan ekspresi; sebelumnya 3.1: MediaPipe via delegate Metal + `SRGBA`)
 **Status:** Siap diimplementasikan lewat Claude Code
 **Dokumen terkait:** `CLAUDE.md`, `docs/PROMPT_CLAUDE_CODE.md`, `docs/FORMULIR_PERSETUJUAN.md`
 
@@ -19,6 +19,8 @@
 
 v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang disalin dan tidak ada uji regresi v1. Gagasan v1 — enhancement pada kanal Y, detektor warna kulit YCbCr, greedy matching — ditulis ulang di paket `pcdface`.
 
+**v3.2** (27 September 2026, **sebelum** data diambil): uji demo menunjukkan deteksi hilang-muncul ketika kepala menoleh atau kamera memandang dari bawah. Set pose yang semula P1 "pembahasan tambahan" dinaikkan menjadi eksperimen **E6 — pose dan ekspresi** (RQ6, H5) dengan level sudut terukur, dua jarak, dan set ekspresi baru. Ekspresi hanyalah kondisi yang diperagakan peserta; sistem tetap tidak menebak ekspresi atau emosi.
+
 ---
 
 ## 1. Arahan yang Harus Dipenuhi
@@ -30,6 +32,7 @@ v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang 
 | **R3** | Ada pengukuran untuk bahan jurnal | Metrik §8, keluaran §10 |
 | **R4** | Data wajah dari anggota kelompok, sebanyak-banyaknya | Protokol dataset §6 |
 | **R5** | Perbandingan deteksi untuk beberapa wajah sekaligus | E2 multi-wajah |
+| **R6** | Titik lemah deteksi: arah hadap, sudut kepala, ekspresi | E6 pose dan ekspresi |
 
 ---
 
@@ -62,6 +65,7 @@ Kedua keluarga detektor punya **cara berbeda memperlakukan ukuran wajah**, dan p
 - **H2 — Resolusi.** Menaikkan resolusi dari 640×360 ke 1280×720 **membantu Haar** di jarak jauh (wajah punya lebih banyak piksel pada resolusi asli), tetapi **hampir tidak membantu MediaPipe** (frame tetap diperkecil ke ukuran masukan model yang sama).
 - **H3 — Pencahayaan.** MediaPipe lebih tahan cahaya redup dan *backlight* dibanding Haar; CLAHE memperkecil selisihnya.
 - **H4 — Kecepatan.** MediaPipe lebih cepat per frame dibanding Haar pada resolusi yang sama.
+- **H5 — Pose dan ekspresi.** Haar `frontalface_default` dilatih pada wajah tampak depan, jadi recall-nya turun tajam begitu kepala menoleh ≥ 45° dan hilang pada profil (90°). BlazeFace lebih toleran terhadap toleh dan anggukan sedang (±30°), tetapi juga gagal pada profil penuh. Ekspresi (senyum, marah, kaget) tidak menurunkan recall secara berarti pada wajah yang menghadap kamera — tetapi skor MediaPipe bisa turun.
 
 Hipotesis ditulis **sebelum** data diambil. Hasil yang membantah hipotesis tetap dilaporkan apa adanya — itu temuan, bukan kegagalan.
 
@@ -78,6 +82,8 @@ Hipotesis ditulis **sebelum** data diambil. Hasil yang membantah hipotesis tetap
 **RQ4 — Resolusi.** Apakah resolusi kamera memengaruhi kedua keluarga detektor secara berbeda (H2)?
 
 **RQ5 — Kecepatan.** Berapa waktu per frame dan FPS masing-masing detektor pada MacBook Air M4?
+
+**RQ6 — Pose dan ekspresi (R6).** Sampai sudut toleh, angguk, dan miring berapa setiap detektor masih menemukan wajah (recall ≥ 0,90), apakah batas itu berubah di jarak yang lebih jauh, dan apakah ekspresi wajah memengaruhi deteksi?
 
 ### Mengapa ukuran wajah dilaporkan dalam piksel dan proporsi
 
@@ -97,7 +103,7 @@ Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandak
 |---|---|
 | Pengenalan / identifikasi siapa orangnya | Batasan proyek |
 | DeepFace, TensorFlow, *embedding*, database wajah | Keputusan v3 |
-| Analisis usia, gender, emosi, ras | — |
+| Analisis usia, gender, emosi, ras | Set ekspresi (E6) hanya kondisi perekaman; sistem tidak menebak ekspresi |
 | Tracking antar frame | Demo tetap deteksi ulang tiap frame |
 | Melatih atau *fine-tune* model | Semua model memakai bobot resmi |
 | Penyimpanan cloud | Semua data lokal |
@@ -107,7 +113,7 @@ Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandak
 1. Sistem hanya melakukan deteksi wajah, yaitu menentukan ada atau tidaknya wajah beserta lokasinya dalam citra, tanpa mengenali identitas individu.
 2. Metode yang dibandingkan adalah Haar Cascade dari pustaka OpenCV dan BlazeFace dari MediaPipe dengan bobot model resmi tanpa pelatihan ulang.
 3. Citra diambil menggunakan webcam laptop pada resolusi 1280×720 piksel, pada jarak 50–300 cm, dalam empat kondisi pencahayaan.
-4. Objek uji berupa wajah tampak depan dari anggota kelompok yang telah memberikan persetujuan tertulis, dengan jumlah 1–4 wajah per citra.
+4. Objek uji berupa wajah anggota kelompok yang telah memberikan persetujuan tertulis, dengan jumlah 1–4 wajah per citra. Wajah tampak depan, kecuali pada set pose (toleh hingga 90°, angguk dan miring 30°, sudut nominal) dan set ekspresi (netral, senyum, marah, kaget).
 5. Sistem tidak melakukan tracking antar frame dan tidak menganalisis atribut wajah.
 
 ---
@@ -176,7 +182,7 @@ Setiap subjek menandatangani formulir persetujuan sebelum difoto (§11).
 Data boleh diambil dalam **beberapa pertemuan (sesi)** pada waktu berbeda. Risikonya: sesi bisa ikut memengaruhi hasil — cahaya ruangan dan posisi kamera jarang persis sama. Aturan supaya efek sesi tidak tercampur dengan faktor eksperimen:
 
 1. **Setiap foto diberi kode sesi** (`capture --session`, bawaan tanggal hari itu). Satu pertemuan = satu kode, mis. `2026-10-01-sore`. Tersimpan di kolom `session` metadata.
-2. **Satu peserta, satu sesi**: set jarak, cahaya, dan pose seorang peserta direkam dalam sesi yang sama (±20 menit). Kondisi *normal* E3 diambil dari set jarak di 100 cm, jadi harus satu sesi dengan set cahayanya.
+2. **Satu peserta, satu sesi**: set jarak, cahaya, pose, dan ekspresi seorang peserta direkam dalam sesi yang sama (±35 menit). Kondisi *normal* E3 diambil dari set jarak di 100 cm, jadi harus satu sesi dengan set cahayanya; acuan E6 (`depan`, `netral`) direkam di dalam set pose/ekspresi itu sendiri.
 3. **Multi-wajah** butuh semua peserta formasi hadir bersamaan — rekam di sesi dengan kehadiran terbanyak. Formasi 4 orang (F3, F6) butuh minimal 4 peserta hadir.
 4. **Setup kamera identik setiap sesi**: posisi dan tinggi lensa, tanda lakban diukur ulang dari kamera, Center Stage/Studio Light/Portrait mati. Foto setup sebagai catatan Metodologi.
 5. **Cahaya ditentukan pengaturan, bukan jam.** *Normal* = lampu ruangan menyala dengan tirai dalam posisi yang sama; *redup* = lampu utama mati/tirai tertutup; *terang* = lampu tambahan ke arah wajah; *backlight* = sumber cahaya terang di belakang peserta. Hindari mengandalkan sinar matahari yang berubah menurut jam; `luma_mean` membuktikan kondisinya.
@@ -203,7 +209,8 @@ Di macOS, ketiga efek video diatur lewat **Control Center → Video Effects** sa
 | **Cahaya** | Di 100 cm: terang, redup, *backlight*; 5 frame per kondisi (normal sudah tercakup set jarak) | 15 | E3 |
 | **Multi-wajah** | 6 formasi × 5 frame (tabel di bawah) | — | E2 |
 | **Kosong** | 20 frame tanpa wajah: ruangan kosong, meja, benda berwarna mirip kulit (kardus, kayu) | — | Mengukur deteksi palsu |
-| **Pose** (P1) | Di 100 cm: menoleh ±30°, menunduk, mendongak; 3 frame per pose | 12 | Pembahasan tambahan |
+| **Pose** | Di 100 dan 200 cm: `depan`, menoleh kiri/kanan 30°, 60°, 90°, menunduk 30°, mendongak 30°, miring kiri/kanan 30°; 3 frame per pose | 66 | E6 |
+| **Ekspresi** | Di 100 cm, menghadap kamera: `netral`, `senyum`, `marah`, `kaget`; 3 frame per ekspresi | 12 | E6 |
 
 Formasi multi-wajah — urutan posisi dicatat dari **kiri ke kanan di citra**:
 
@@ -218,15 +225,26 @@ Formasi multi-wajah — urutan posisi dicatat dari **kiri ke kanan di citra**:
 
 Rotasi siapa berdiri di posisi mana antar frame, supaya satu orang tidak selalu berada di jarak yang sama.
 
+**Protokol pose dan ekspresi (E6):**
+
+- **Kiri/kanan menurut peserta.** `kiri30` = peserta menoleh ke kiri *dirinya*; karena pratinjau tidak dicerminkan, wajahnya tampak menghadap ke kanan citra.
+- **Sudut toleh diatur dengan penanda**, bukan diperkirakan. Tempel titik lakban di dinding/penyangga pada ketinggian mata, berjarak 1 m dari mata peserta: 30° = 58 cm ke samping dari garis lurus ke kamera, 60° = 173 cm. 90° = menatap lurus ke samping (sejajar bidang kamera). Bahu tetap menghadap kamera; kepala yang berputar.
+- **Angguk dan miring 30°**: menunduk = menatap titik di lantai, mendongak = menatap titik di dinding atas; miring = telinga mendekat ke bahu. Sudutnya nominal (galat ±10° wajar) dan dibahas sebagai keterbatasan.
+- **Ekspresi diperagakan** dengan jelas: senyum lebar (gigi tampak), marah (alis turun, dahi berkerut), kaget (mata membuka lebar, mulut terbuka). Kepala tetap menghadap lensa.
+- **Kamera tidak digerakkan.** Posisi dan tinggi lensa sama dengan set jarak (§6.3). Sudut kamera dari bawah/atas setara dengan pose mendongak/menunduk dan tidak diuji terpisah.
+- `capture --pose semua` / `--expression semua` merekam semua level berurutan dengan instruksi di layar, jadi satu perintah per jarak.
+
 ### 6.5 Perkiraan ukuran dataset
 
-Untuk 6 subjek: set jarak 180 citra, set cahaya 90, multi-wajah 30, kosong 20 — total **320 citra berisi 360 wajah**. Anotasi kotak manual kira-kira 10 detik per wajah, jadi sekitar satu jam dan bisa dicicil.
+Per subjek: set jarak 30 citra, cahaya 15, pose 66, ekspresi 12 — **123 citra**, sekitar 35 menit perekaman. Untuk 4 subjek: 492 citra satu wajah + multi-wajah 30 + kosong 20 — total **542 citra berisi ±580 wajah**. Anotasi kotak manual kira-kira 10 detik per wajah, jadi sekitar 1,5–2 jam dan bisa dicicil.
 
 ### 6.6 Penamaan berkas dan metadata
 
 ```
 data/raw/jarak/S03/jarak_S03_150cm_normal_04.jpg
 data/raw/cahaya/S03/cahaya_S03_100cm_redup_02.jpg
+data/raw/pose/S03/pose_S03_200cm_kiri60_01.jpg
+data/raw/ekspresi/S03/ekspresi_S03_100cm_marah_03.jpg
 data/raw/multi/F5/multi_F5_03.jpg
 data/raw/kosong/kosong_07.jpg
 ```
@@ -236,12 +254,14 @@ Tool perekam menulis satu baris ke `data/metadata.csv` untuk setiap frame:
 | Kolom | Contoh | Keterangan |
 |---|---|---|
 | `file` | `jarak/S03/jarak_S03_150cm_normal_04.jpg` | Relatif terhadap `data/raw/` |
-| `set` | `jarak` | `jarak`, `cahaya`, `multi`, `kosong`, `pose` |
+| `set` | `jarak` | `jarak`, `cahaya`, `multi`, `kosong`, `pose`, `ekspresi` |
 | `subject_id` | `S03` | Kosong untuk `multi` dan `kosong` |
 | `formation` | `F5` | Hanya untuk `multi` |
 | `positions_cm` | `80;150;250` | Jarak tiap posisi kiri→kanan, hanya untuk `multi` |
 | `distance_cm` | `150` | Untuk set satu wajah |
 | `lighting` | `normal` | `normal`, `terang`, `redup`, `backlight` |
+| `pose` | `kiri60` | Hanya set pose (§6.4) |
+| `expression` | `marah` | Hanya set ekspresi |
 | `session` | `2026-10-01-sore` | Kode sesi pengambilan (§6.2) |
 | `expected_faces` | `3` | Dipakai `validate` untuk mencocokkan jumlah kotak anotasi |
 | `luma_mean` | `112.4` | Rerata kanal Y, otomatis — bukti kuantitatif kondisi cahaya |
@@ -259,6 +279,8 @@ Tool `annotate` dipakai untuk menggambar kotak di **setiap wajah pada setiap cit
 Perintah `crop` mengekspor isi setiap kotak ke `data/crops/{set}/...` untuk tiga kegunaan: memeriksa konsistensi anotasi secara visual, mengukur lebar wajah per jarak, dan menyediakan contoh gambar untuk laporan (hanya subjek yang mengizinkan publikasi).
 
 **Aturan kotak — tetapkan sekali, tulis di Metodologi, jangan diubah:** batas atas garis tumbuh rambut, batas bawah ujung dagu, kiri-kanan tepi pipi, tanpa telinga dan leher.
+
+Untuk wajah yang menoleh (set pose), kiri-kanan kotak adalah batas **bagian wajah yang tampak**: dari tepi pipi yang terlihat sampai ujung hidung atau tepi pipi seberang, mana yang lebih luar; telinga tetap tidak dimasukkan. Pada profil 90° kotak menjadi sempit dan tinggi. Wajah yang menunduk/mendongak/miring tetap dibatasi garis rambut–dagu, dan kotaknya tetap tegak (tidak diputar).
 
 **Konsekuensi yang wajib dibahas:** setiap detektor punya konvensi kotaknya sendiri — Haar selalu persegi, BlazeFace punya proporsinya sendiri — dan keduanya berbeda dari aturan kotak manual. Karena itu IoU dilaporkan pada ambang utama **0,5** dan juga **0,3 serta 0,4** sebagai uji sensitivitas. Bila peringkat detektor berubah antar ambang, perbedaan konvensi kotak ikut berperan dan harus disebutkan.
 
@@ -358,6 +380,18 @@ Protokol §8.5 untuk semua detektor P0 pada kedua resolusi.
 
 Haar: `scaleFactor` {1,05; 1,1; 1,2} × `minNeighbors` {3; 5; 7}. MediaPipe: kurva PR sudah mencakup seluruh rentang `min_detection_confidence`. Keluaran: tabel F1 dan waktu per kombinasi — menunjukkan bahwa perbandingan tidak bergantung pada satu setelan yang kebetulan menguntungkan.
 
+### E6 — Pose dan ekspresi (P0) → RQ6, H5
+
+| Faktor | Level |
+|---|---|
+| Detektor | `haar`, `mp_short`, `mp_full` |
+| Pose | `depan`; menoleh kiri/kanan 30°, 60°, 90°; menunduk/mendongak 30°; miring kiri/kanan 30° |
+| Jarak (set pose) | 100 cm dan 200 cm — interaksi pose × jarak (pose sulit di jarak jauh) |
+| Ekspresi | `netral`, `senyum`, `marah`, `kaget` di 100 cm |
+| Data | Set pose + set ekspresi + set kosong untuk FPPI; resolusi asli, tanpa enhancement, parameter bawaan |
+
+Keluaran: recall (Wilson) per detektor × jarak × pose dan per ekspresi; rerata skor MediaPipe pada wajah yang terdeteksi (skor turun sebelum wajah hilang); recall per sumbu × sudut dengan kiri dan kanan digabung; **sudut toleh terbesar** yang masih memenuhi recall ≥ 0,90 (titik dan konservatif dengan batas bawah Wilson); selisih recall setiap pose terhadap `depan` dan setiap ekspresi terhadap `netral` pada peserta yang sama (bootstrap berpasangan per peserta); selisih recall antar detektor pada citra yang sama.
+
 ### Ringkasan prioritas
 
 | Eksperimen | Prioritas | Data |
@@ -367,6 +401,7 @@ Haar: `scaleFactor` {1,05; 1,1; 1,2} × `minNeighbors` {3; 5; 7}. MediaPipe: kur
 | E3 | P0 | Set cahaya + jarak 100 cm |
 | E4 | P0 | Sampel apa saja |
 | E5 | P1 | Semua set |
+| E6 | P0 | Set pose + ekspresi |
 
 Set kosong ikut dihitung di semua eksperimen untuk FPPI.
 
@@ -374,7 +409,7 @@ Set kosong ikut dihitung di semua eksperimen untuk FPPI.
 
 ## 10. Keluaran untuk Laporan dan Jurnal
 
-Setiap eksperimen menulis ke `results/{e1..e5}/`: tabel `.csv` + `.md` (setiap proporsi disertai interval), grafik `.png` 300 dpi + `.pdf`, dan `config_snapshot.yaml` berisi salinan konfigurasi beserta versi perangkat lunak.
+Setiap eksperimen menulis ke `results/{e1..e6}/`: tabel `.csv` + `.md` (setiap proporsi disertai interval), grafik `.png` 300 dpi + `.pdf`, dan `config_snapshot.yaml` berisi salinan konfigurasi beserta versi perangkat lunak.
 
 Grafik minimum:
 
@@ -386,6 +421,8 @@ Grafik minimum:
 6. Akurasi hitung per formasi multi-wajah (E2)
 7. Peta panas F1: detektor × cahaya × enhancement (E3)
 8. Waktu per frame, median dengan *error bar* p95, per resolusi (E4)
+9. Recall per pose kepala — toleh 0–90° bersambung, lalu angguk dan miring — satu panel per jarak (E6)
+10. Recall per ekspresi wajah (E6)
 
 Contoh gambar deteksi hanya memakai wajah subjek yang mencentang izin publikasi; wajah lainnya diburamkan.
 
@@ -422,7 +459,7 @@ pcd-face-detection/
 │   └── FORMULIR_PERSETUJUAN.md
 ├── models/                           # .tflite + checksums.txt; di-gitignore kecuali checksums.txt
 ├── data/                             # di-gitignore kecuali README.md dan .gitkeep
-│   ├── raw/{jarak,cahaya,multi,kosong,pose}/
+│   ├── raw/{jarak,cahaya,multi,kosong,pose,ekspresi}/
 │   ├── metadata.csv
 │   ├── annotations/boxes.json
 │   └── crops/
@@ -432,6 +469,7 @@ pcd-face-detection/
 │   ├── cli.py
 │   ├── paths.py                      # PROJECT_ROOT dan path bawaan
 │   ├── config.py                     # muat + validasi experiment.yaml
+│   ├── pose.py                       # nama pose → sumbu + sudut nominal; acuan depan/netral
 │   ├── preprocessing.py              # enhancement kanal Y (none | clahe), luminansi
 │   ├── synthetic.py                  # dataset sintetis lengkap (semua set) untuk --synthetic dan tes
 │   ├── dataset/
@@ -459,10 +497,11 @@ pcd-face-detection/
 │   │   ├── e2_multiface.py
 │   │   ├── e3_lighting.py
 │   │   ├── e4_speed.py
-│   │   └── e5_sensitivity.py
+│   │   ├── e5_sensitivity.py
+│   │   └── e6_pose_expression.py
 │   ├── reporting/
 │   │   ├── tables.py
-│   │   └── plots.py                  # delapan grafik §10
+│   │   └── plots.py                  # sepuluh grafik §10
 │   └── tools/
 │       ├── download_models.py
 │       ├── capture.py                # rekam per set/subjek/jarak/formasi + tulis metadata
@@ -493,8 +532,10 @@ pcd-face-detection/
 | `download-models` | Unduh `.tflite`, tulis dan verifikasi SHA-256 |
 | `capture --set jarak --subject S03 --distance 150 --lighting normal --count 5` | Rekam dan tulis metadata |
 | `capture --set multi --formation F5 --count 5` | Posisi diambil dari tabel formasi di config |
+| `capture --set pose --subject S03 --distance 200 --pose semua` | Semua pose berurutan di satu jarak; instruksi tampil di layar |
+| `capture --set ekspresi --subject S03 --expression semua` | Semua ekspresi berurutan di jarak acuan |
 | `annotate` / `crop` / `validate` | Anotasi, ekspor crop, periksa konsistensi data |
-| `run e1` … `run e5`, `run all` | Eksperimen; `--synthetic` memakai citra sintetis + FakeDetector |
+| `run e1` … `run e6`, `run all` | Eksperimen; `--synthetic` memakai citra sintetis + FakeDetector |
 | `report` | Bangun ulang tabel dan grafik dari hasil tersimpan |
 | `demo --detector mp_short` | Demo realtime; tombol untuk ganti detektor saat berjalan |
 | `forget S03` | Hapus seluruh data satu subjek |
@@ -510,8 +551,9 @@ Keputusan berikut mengisi celah yang tidak ditentukan bagian lain. Semuanya diba
 4. **Cakupan metrik.** P/R/F1 dan AP dihitung pada citra berwajah. FPPI dilaporkan dua kali: pada set kosong saja, dan pada seluruh citra (berwajah + kosong).
 5. **Interval.** Proporsi → Wilson 95%. Karena frame dari subjek yang sama berkorelasi, recall per jarak juga diberi interval bootstrap per subjek. Perbandingan dua detektor memakai **bootstrap berpasangan atas selisih** (ΔF1, ΔAP, Δrecall) pada resampel subjek yang sama; "lebih baik" hanya bila interval selisihnya tidak memuat 0.
 6. **Jarak optimal** = jarak dengan estimasi titik recall ≥ `recall_target`; batas bawah Wilson ikut dilaporkan. **Ukuran wajah minimum** = batas bawah bin lebar wajah (dari kotak manual, kedua resolusi digabung) terkecil sehingga bin itu dan semua bin di atasnya punya recall ≥ `recall_target`. Bin piksel dan bin proporsi ada di config.
-7. **Metadata** ditambah kolom `subjects` (kode peserta kiri→kanan pada citra multi-wajah; dibutuhkan `forget`) dan `pose`. Izin publikasi disimpan di `data/subjects.csv` (kode + izin, tanpa nama).
+7. **Metadata** ditambah kolom `subjects` (kode peserta kiri→kanan pada citra multi-wajah; dibutuhkan `forget`), `pose`, dan `expression`. Izin publikasi disimpan di `data/subjects.csv` (kode + izin, tanpa nama).
 8. **Waktu deteksi** mencakup konversi warna yang dibutuhkan detektor (BGR→abu-abu+ekualisasi untuk Haar, BGR→RGBA+`mp.Image` untuk MediaPipe), tidak mencakup baca berkas maupun enhancement.
+9. **E6 memakai titik operasi saja** (parameter bawaan, tanpa enhancement, resolusi asli). Metrik utama recall, karena setiap citra pose/ekspresi berisi tepat satu wajah; FP tetap dilaporkan. Acuan perbandingan adalah `depan` di jarak yang sama dan `netral`, **dari peserta yang sama**; selisihnya diuji dengan bootstrap berpasangan per peserta. Kiri dan kanan digabung per sudut (`e6_per_sumbu`) karena toleh dianggap simetris; tabel per pose tetap memisahkannya. **Sudut maksimum** = sudut terbesar sehingga pose depan dan semua sudut di bawahnya punya recall ≥ `recall_target` (titik; versi konservatif memakai batas bawah Wilson). Haar yang dipakai tetap `frontalface_default` — kaskade profil OpenCV tidak ditambahkan, supaya E6 mengukur detektor yang sama dengan E1–E4.
 
 ---
 
@@ -559,8 +601,8 @@ pytest>=8.0
 | **1 — Kerangka paket** | Paket `pcdface` dari awal, `paths`, `config`, `DetectionResult`, preprocessing, matching, CLI kerangka | `pytest` lulus; `python -m pcdface selftest` lulus |
 | **2 — Alat data** | capture (semua set), metadata, annotate, crop, validate, forget | Metadata benar untuk tiap set; `validate` menangkap jumlah kotak ≠ `expected_faces` dan berkas yatim; `forget` menghapus tuntas termasuk citra multi-wajah |
 | **3 — Detektor & metrik** | haar (skor + equalize), mediapipe, fake, registry, seluruh modul evaluasi | Tes metrik lulus dengan nilai acuan hitungan tangan; tes kontrak detektor lulus; `pytest -m models` lulus |
-| **4 — Eksperimen** | E1–E4 (+E5), runner, perkecilan resolusi | `run all --synthetic` menghasilkan semua tabel §10 tanpa galat |
-| **5 — Pelaporan & demo** | tables, plots, demo dengan MediaPipe | Delapan grafik terbentuk; demo bisa berganti haar ↔ mp_short ↔ mp_full saat berjalan |
+| **4 — Eksperimen** | E1–E4, E6 (+E5), runner, perkecilan resolusi | `run all --synthetic` menghasilkan semua tabel §10 tanpa galat |
+| **5 — Pelaporan & demo** | tables, plots, demo dengan MediaPipe | Sepuluh grafik terbentuk; demo bisa berganti haar ↔ mp_short ↔ mp_full saat berjalan |
 
 Sepanjang semua fase: `pytest` hijau, dan tidak ada berkas dari `data/`, `models/*.tflite`, atau citra `results/` yang ter-*commit*.
 
@@ -575,7 +617,7 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 | 1 | 23–29 Sep | Fase 0–1; formulir persetujuan ditandatangani |
 | 2 | 30 Sep–6 Okt | Fase 2; pertemuan pengambilan data (boleh beberapa sesi, §6.2); mulai anotasi |
 | 3 | 7–13 Okt | Fase 3; selesaikan anotasi dan crop |
-| 4 | 14–20 Okt | Fase 4; jalankan E1–E4 |
+| 4 | 14–20 Okt | Fase 4; jalankan E1–E4 dan E6 |
 | 5 | 21–27 Okt | Fase 5; susun draf paper; latihan demo |
 
 ---
@@ -595,6 +637,10 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 | Konvensi kotak berbeda antar detektor | IoU 0,3 / 0,4 / 0,5 dan AP (§7, §8.2) |
 | Jumlah subjek kecil | Interval kepercayaan dilaporkan jujur (§8.6) |
 | Wajah tidak terdeteksi di jarak jauh | Itu **temuan** yang menjawab R1, bukan galat |
+| Sudut pose tidak persis (kepala diputar kira-kira) | Penanda lakban berjarak terukur (§6.4); sudut disebut nominal; kiri dan kanan digabung untuk memperkecil pengaruh galat satu sisi |
+| Beban anotasi bertambah (±580 wajah) | Cicil per sesi; `annotate --set pose` untuk mengerjakan satu set |
+| Wajah profil sulit dianotasi konsisten | Aturan kotak bagian wajah yang tampak (§7); contoh kotak profil disepakati kelompok sebelum mulai |
+
 
 ---
 
@@ -639,13 +685,19 @@ capture:
   camera_index: 0
 
 dataset:
-  sets: [jarak, cahaya, multi, kosong, pose]
+  sets: [jarak, cahaya, multi, kosong, pose, ekspresi]
   distances_cm: [50, 100, 150, 200, 250, 300]
   lightings: [normal, terang, redup, backlight]
-  poses: [kiri, kanan, menunduk, mendongak]
-  reference_distance_cm: 100         # jarak set cahaya dan pose
+  reference_distance_cm: 100         # jarak set cahaya dan ekspresi; kondisi normal E3
   frames_per_condition: 5
   empty_images: 20
+  # E6 — pose dan ekspresi (PRD §6.4, §9). Nama pose: depan | kiri30 | kanan60 | menunduk30 |
+  # mendongak30 | miringkiri30 | ... (kiri/kanan menurut peserta). 'depan' dan 'netral' = acuan.
+  poses: [depan, kiri30, kanan30, kiri60, kanan60, kiri90, kanan90,
+          menunduk30, mendongak30, miringkiri30, miringkanan30]
+  pose_distances_cm: [100, 200]
+  expressions: [netral, senyum, marah, kaget]
+  pose_frames_per_condition: 3       # set pose dan ekspresi
   formations:                        # posisi kiri → kanan di citra
     F1: [100, 100]
     F2: [100, 100, 100]
@@ -724,8 +776,11 @@ experiments:
     enabled: false                   # P1
     scale_factors: [1.05, 1.1, 1.2]
     min_neighbors: [3, 5, 7]
+  e6:
+    detectors: [haar, mp_short, mp_full]
 
 stats:
+
   ci_level: 0.95
   bootstrap_resamples: 1000
 

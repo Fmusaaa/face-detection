@@ -14,8 +14,9 @@ from typing import Any, Callable, Mapping
 import yaml
 
 from pcdface.paths import CONFIG_PATH, PROJECT_ROOT, ProjectPaths
+from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_POSE, parse_pose
 
-SETS = ("jarak", "cahaya", "multi", "kosong", "pose")
+SETS = ("jarak", "cahaya", "multi", "kosong", "pose", "ekspresi")
 ENHANCEMENTS = ("none", "clahe")
 DETECTOR_TYPES = ("haar", "mediapipe", "ycbcr")
 
@@ -44,6 +45,9 @@ class DatasetConfig:
     frames_per_condition: int
     empty_images: int
     formations: dict[str, tuple[int, ...]]
+    pose_distances_cm: tuple[int, ...] = (100,)
+    expressions: tuple[str, ...] = (REFERENCE_EXPRESSION,)
+    pose_frames_per_condition: int = 3
 
 
 @dataclass(frozen=True)
@@ -144,12 +148,18 @@ class E5Config:
 
 
 @dataclass(frozen=True)
+class E6Config:
+    detectors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ExperimentsConfig:
     e1: E1Config
     e2: E2Config
     e3: E3Config
     e4: E4Config
     e5: E5Config
+    e6: E6Config
 
 
 @dataclass(frozen=True)
@@ -373,7 +383,21 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
         frames_per_condition=r.get(ds, "frames_per_condition", "dataset.", _int, lambda v: v > 0, "> 0"),
         empty_images=r.get(ds, "empty_images", "dataset.", _int, lambda v: v >= 0, ">= 0"),
         formations=formations,
+        pose_distances_cm=r.get(ds, "pose_distances_cm", "dataset.", _list(_int),
+                                lambda v: len(v) > 0 and list(v) == sorted(set(v)), "naik, unik"),
+        expressions=r.get(ds, "expressions", "dataset.", _list(_str),
+                          lambda v: REFERENCE_EXPRESSION in v, f"memuat '{REFERENCE_EXPRESSION}' sebagai acuan"),
+        pose_frames_per_condition=r.get(ds, "pose_frames_per_condition", "dataset.", _int, lambda v: v > 0, "> 0"),
     )
+    for pose in dataset.poses or ():
+        try:
+            parse_pose(pose)
+        except ValueError as error:
+            r.errors.append(f"dataset.poses: {error}")
+    if dataset.poses and REFERENCE_POSE not in dataset.poses:
+        r.errors.append(f"dataset.poses: harus memuat '{REFERENCE_POSE}' sebagai acuan perbandingan E6")
+    if dataset.distances_cm and dataset.pose_distances_cm and not set(dataset.pose_distances_cm) <= set(dataset.distances_cm):
+        r.errors.append("dataset.pose_distances_cm: harus bagian dari distances_cm (tanda lakban yang sama)")
     if dataset.distances_cm and dataset.reference_distance_cm and dataset.reference_distance_cm not in dataset.distances_cm:
         r.errors.append("dataset.reference_distance_cm: harus salah satu dari distances_cm "
                         "(kondisi normal E3 diambil dari set jarak)")
@@ -419,7 +443,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
     def section(key: str) -> dict[str, Any]:
         return r.section(ex, key, "experiments.")
 
-    e1, e2, e3, e4, e5 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5"))
+    e1, e2, e3, e4, e5, e6 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5", "e6"))
     experiments = ExperimentsConfig(
         e1=E1Config(
             detectors=r.get(e1, "detectors", "experiments.e1.", names),
@@ -444,9 +468,12 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
             scale_factors=r.get(e5, "scale_factors", "experiments.e5.", _list(_float), lambda v: len(v) > 0 and min(v) > 1, "> 1"),
             min_neighbors=r.get(e5, "min_neighbors", "experiments.e5.", _list(_int), lambda v: len(v) > 0 and min(v) >= 0, ">= 0"),
         ),
+        e6=E6Config(detectors=r.get(e6, "detectors", "experiments.e6.", names)),
     )
 
-    for key, spec in (("e1", experiments.e1), ("e2", experiments.e2), ("e3", experiments.e3), ("e4", experiments.e4)):
+    for key, spec in (("e1", experiments.e1), ("e2", experiments.e2), ("e3", experiments.e3), ("e4", experiments.e4),
+                      ("e6", experiments.e6)):
+
         for name in spec.detectors or ():
             if name not in det_raw:
                 r.errors.append(f"experiments.{key}.detectors: '{name}' tidak ada di bagian detectors")

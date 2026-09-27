@@ -33,7 +33,9 @@ EXPERIMENT_TITLES = {
     "e3": "E3 — Pencahayaan × enhancement",
     "e4": "E4 — Kecepatan",
     "e5": "E5 — Sensitivitas parameter Haar",
+    "e6": "E6 — Pose dan ekspresi",
 }
+
 GT_COLOR = (0, 190, 0)
 DET_COLOR = (0, 140, 255)
 
