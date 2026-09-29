@@ -6,14 +6,18 @@ Tiga hal yang wajib (CLAUDE.md aturan #1, #2):
 - OpenCV membaca BGR, MediaPipe butuh RGB: konversi BGR→RGBA, lalu
   `mp.Image(image_format=SRGBA)`. Salah urutan kanal tidak memunculkan galat,
   deteksi hanya diam-diam memburuk;
-- delegate GPU (Metal): delegate CPU MediaPipe 1.0.1 crash di macOS, dan
-  delegate Metal hanya menerima citra 4 kanal.
+- delegate GPU (Metal) di macOS: delegate CPU MediaPipe 1.0.1 crash di macOS, dan
+  delegate Metal hanya menerima citra 4 kanal. Di Windows/Linux (laptop anggota
+  lain) `delegate: auto` memilih CPU; `SRGBA` juga diterima jalur CPU.
+  Variabel lingkungan `PCDFACE_MP_DELEGATE=cpu|gpu` menimpa config.
 
 Kotak dikembalikan dalam piksel dan dipotong ke batas citra.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -24,6 +28,24 @@ from pcdface.boxes import clip_box
 from pcdface.detection.base import DetectionResult, Detector
 
 RUNNING_MODES = ("image", "video")
+DELEGATE_ENV = "PCDFACE_MP_DELEGATE"
+
+
+def resolve_delegate(requested: str = "auto", platform: str | None = None) -> str:
+    """'gpu' atau 'cpu'. Variabel lingkungan menang atas config; 'auto' = GPU hanya di macOS."""
+    choice = (os.environ.get(DELEGATE_ENV) or requested or "auto").strip().lower()
+    if choice not in ("auto", "gpu", "cpu"):
+        raise ValueError(f"delegate MediaPipe harus auto, gpu, atau cpu — dapat {choice!r}")
+    if choice == "auto":
+        return "gpu" if (platform or sys.platform) == "darwin" else "cpu"
+    return choice
+
+
+def delegate_label(delegate: str, platform: str | None = None) -> str:
+    """Nama perangkat untuk tabel dan HUD."""
+    if delegate == "cpu":
+        return "CPU"
+    return "GPU (Metal)" if (platform or sys.platform) == "darwin" else "GPU"
 
 
 def to_mediapipe_pixels(image_bgr: np.ndarray) -> np.ndarray:
@@ -45,6 +67,7 @@ class MediaPipeDetector(Detector):
         min_detection_confidence: float = 0.5,
         min_suppression_threshold: float = 0.3,
         running_mode: str = "image",
+        delegate: str = "auto",
     ) -> None:
         if running_mode not in RUNNING_MODES:
             raise ValueError(f"running_mode harus salah satu dari {RUNNING_MODES}")
@@ -61,8 +84,11 @@ class MediaPipeDetector(Detector):
         self.name = name
         self.running_mode = running_mode
         self.model_path = model_path
+        self.delegate = resolve_delegate(delegate)
+        mp_delegate = BaseOptions.Delegate.GPU if self.delegate == "gpu" else BaseOptions.Delegate.CPU
         options = vision.FaceDetectorOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path), delegate=BaseOptions.Delegate.GPU),
+            base_options=BaseOptions(model_asset_path=str(model_path), delegate=mp_delegate),
+
             running_mode=vision.RunningMode.VIDEO if running_mode == "video" else vision.RunningMode.IMAGE,
             min_detection_confidence=float(min_detection_confidence),
             min_suppression_threshold=float(min_suppression_threshold),

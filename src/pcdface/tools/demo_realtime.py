@@ -49,7 +49,13 @@ class DetectorCache:
         return self._built[name]
 
     def device(self, name: str) -> str:
-        return "GPU Metal" if isinstance(self.cfg.detector(name), MediaPipeConfig) else "CPU"
+        spec = self.cfg.detector(name)
+        if not isinstance(spec, MediaPipeConfig):
+            return "CPU"
+        from pcdface.detection.mediapipe_detector import delegate_label, resolve_delegate
+
+        return delegate_label(resolve_delegate(spec.delegate))
+
 
     def close(self) -> None:
         for detector in self._built.values():

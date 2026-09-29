@@ -1,4 +1,4 @@
-"""Grafik PRD §10 (8 grafik minimum + 2 grafik E6) — PNG 300 dpi + PDF, dibangun dari CSV hasil.
+"""Grafik PRD §10 (8 grafik minimum + grafik 9–12 untuk E6 dan E7) — PNG 300 dpi + PDF, dibangun dari CSV hasil.
 
 Semua grafik hanya membaca tabel `.csv` di folder eksperimen, sehingga
 `python -m pcdface report` bisa membangunnya ulang tanpa menjalankan detektor.
@@ -416,25 +416,71 @@ def plot_pose(out_dir: Path) -> list[Path]:
     return _save(fig, out_dir, "grafik9_recall_pose")
 
 
-def plot_expression(out_dir: Path) -> list[Path]:
-    """Grafik 10: recall per ekspresi wajah, galat Wilson."""
-    df = _read(out_dir, "e6_ekspresi")
+def _plot_levels(out_dir: Path, table: str, column: str, title: str, stem: str) -> list[Path]:
+    """Recall per level satu faktor (ekspresi / oklusi), titik per detektor dengan galat Wilson."""
+    df = _read(out_dir, table)
     if df is None:
         return []
     detectors = list(dict.fromkeys(df["detektor"]))
-    expressions = list(dict.fromkeys(df["ekspresi"]))
+    levels = list(dict.fromkeys(df[column]))
     width = 0.6 / max(len(detectors), 1)
-    fig, ax = plt.subplots(figsize=(1.1 * len(expressions) + 2.2, 3.7))
-    x = np.arange(len(expressions), dtype=float)
+    fig, ax = plt.subplots(figsize=(1.2 * len(levels) + 2.4, 3.7))
+    x = np.arange(len(levels), dtype=float)
     for i, name in enumerate(detectors):
-        part = df[df["detektor"] == name].set_index("ekspresi").reindex(expressions)
+        part = df[df["detektor"] == name].set_index(column).reindex(levels)
         _dodged_points(ax, x, part, name, (i - (len(detectors) - 1) / 2) * width, line=False)
-    ax.set_xticks(x, expressions)
+    ax.set_xticks(x, [str(v).replace("_", " ") for v in levels])
     ax.grid(axis="x", visible=False)
     _recall_axis(ax)
-    ax.set_title("Recall per ekspresi (wajah menghadap kamera), galat = Wilson 95%", loc="left")
+    ax.set_title(title, loc="left")
     ax.legend(loc="lower left")
-    return _save(fig, out_dir, "grafik10_recall_ekspresi")
+    return _save(fig, out_dir, stem)
+
+
+def plot_expression(out_dir: Path) -> list[Path]:
+    """Grafik 10: recall per ekspresi wajah, galat Wilson."""
+    return _plot_levels(out_dir, "e6_ekspresi", "ekspresi",
+                        "Recall per ekspresi (wajah menghadap kamera), galat = Wilson 95%", "grafik10_recall_ekspresi")
+
+
+def plot_occlusion(out_dir: Path) -> list[Path]:
+    """Grafik 11: recall per penutup wajah, galat Wilson."""
+    return _plot_levels(out_dir, "e6_oklusi", "oklusi",
+                        "Recall per penutup wajah, galat = Wilson 95%", "grafik11_recall_oklusi")
+
+
+# ---------------------------------------------------------------------------
+# E7
+# ---------------------------------------------------------------------------
+def plot_blur(out_dir: Path) -> list[Path]:
+    """Grafik 12: recall terhadap jarak per level blur, satu panel per detektor."""
+    df = _read(out_dir, "e7_recall_per_jarak")
+    if df is None:
+        return []
+    detectors = list(dict.fromkeys(df["detektor"]))
+    blurs = sorted(df["blur_px"].unique())
+    # blur makin panjang → biru makin gelap; 0 (asli) paling gelap agar acuan menonjol
+    shades = SEQUENTIAL[2:][: len(blurs)] if len(blurs) <= len(SEQUENTIAL) - 2 else SEQUENTIAL[-len(blurs):]
+    colors = {blur: ("#0b0b0b" if blur == 0 else shades[i]) for i, blur in enumerate(blurs)}
+    fig, axes = plt.subplots(1, len(detectors), figsize=(3.4 * len(detectors) + 0.8, 3.7), sharey=True, squeeze=False)
+    for ax, name in zip(axes[0], detectors):
+        for blur in blurs:
+            part = df[(df["detektor"] == name) & (df["blur_px"] == blur)].sort_values("jarak_cm")
+            ax.plot(part["jarak_cm"], part["recall"], color=colors[blur], marker="o", markersize=4,
+                    linewidth=1.8 if blur == 0 else 1.4, label="asli" if blur == 0 else f"{blur} px")
+        ax.set_title(_label(name), loc="left")
+        ax.set_xlabel("Jarak (cm)")
+        ax.set_xticks(sorted(df["jarak_cm"].unique()))
+        ax.tick_params(axis="x", labelsize=7.5)
+        _recall_axis(ax)
+        if ax is not axes[0][0]:
+            ax.set_ylabel("")
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(blurs) + 1, bbox_to_anchor=(0.5, -0.13),
+               title="panjang blur gerak:", alignment="left")
+
+    fig.suptitle("Recall terhadap jarak pada blur gerak simulasi", x=0.01, y=1.03, ha="left", color=INK, fontsize=11.5)
+    return _save(fig, out_dir, "grafik12_recall_blur")
 
 
 PLOTTERS = {
@@ -444,8 +490,10 @@ PLOTTERS = {
     "e3": [plot_lighting_heatmap],
     "e4": [plot_speed],
     "e5": [],
-    "e6": [plot_pose, plot_expression],
+    "e6": [plot_pose, plot_expression, plot_occlusion],
+    "e7": [plot_blur],
 }
+
 
 
 

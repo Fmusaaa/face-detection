@@ -1,7 +1,7 @@
 """Skema `metadata.csv` dan `subjects.csv`, serta aturan penamaan berkas.
 
 Satu baris metadata per foto (PRD §6.6, ditambah kolom `subjects`, `pose`,
-`expression`, dan `session` — PRD §12.2 butir 7, §6.2). `subjects.csv` hanya memuat kode peserta dan izinnya;
+`expression`, `occlusion`, dan `session` — PRD §12.2 butir 7, §6.2). `subjects.csv` hanya memuat kode peserta dan izinnya;
 nama asli tidak pernah disimpan di folder proyek.
 """
 
@@ -17,12 +17,12 @@ from typing import Iterable
 
 COLUMNS = (
     "file", "set", "session", "subject_id", "subjects", "formation", "positions_cm",
-    "distance_cm", "lighting", "pose", "expression", "expected_faces", "luma_mean",
+    "distance_cm", "lighting", "pose", "expression", "occlusion", "expected_faces", "luma_mean",
     "width", "height", "captured_at",
 )
 # Kolom yang boleh tidak ada di berkas lama; dianggap kosong saat dibaca
-OPTIONAL_COLUMNS = frozenset({"session", "expression"})
-SINGLE_FACE_SETS = ("jarak", "cahaya", "pose", "ekspresi")
+OPTIONAL_COLUMNS = frozenset({"session", "expression", "occlusion"})
+SINGLE_FACE_SETS = ("jarak", "cahaya", "pose", "ekspresi", "oklusi")
 SUBJECT_COLUMNS = ("subject_id", "consent_research", "consent_publication", "consent_date")
 
 SUBJECT_ID = re.compile(r"^S\d{2,3}$")
@@ -51,6 +51,7 @@ class MetadataRow:
     distance_cm: int | None = None
     pose: str = ""
     expression: str = ""                        # set ekspresi: netral, senyum, marah, ...
+    occlusion: str = ""                         # set oklusi: tanpa, masker, tangan, ...
     luma_mean: float | None = None
     captured_at: str = ""
 
@@ -79,6 +80,7 @@ class MetadataRow:
             "lighting": self.lighting,
             "pose": self.pose,
             "expression": self.expression,
+            "occlusion": self.occlusion,
             "expected_faces": str(self.expected_faces),
             "luma_mean": "" if self.luma_mean is None else f"{self.luma_mean:.1f}",
             "width": str(self.width),
@@ -103,6 +105,7 @@ class MetadataRow:
             lighting=row.get("lighting", "") or "normal",
             pose=row.get("pose", "") or "",
             expression=row.get("expression", "") or "",
+            occlusion=row.get("occlusion", "") or "",
             expected_faces=int(row["expected_faces"]),
             luma_mean=float(row["luma_mean"]) if row.get("luma_mean") else None,
             width=int(row["width"]),
@@ -242,6 +245,7 @@ class CaptureSpec:
     formation: str = ""
     subjects: tuple[str, ...] = field(default=())
     expression: str = ""
+    occlusion: str = ""
 
     def folder(self) -> str:
         if self.set in SINGLE_FACE_SETS:
@@ -257,6 +261,9 @@ class CaptureSpec:
             return f"pose_{self.subject_id}_{self.distance_cm}cm_{self.pose}"
         if self.set == "ekspresi":
             return f"ekspresi_{self.subject_id}_{self.distance_cm}cm_{self.expression}"
+        if self.set == "oklusi":
+            return f"oklusi_{self.subject_id}_{self.distance_cm}cm_{self.occlusion}"
+
 
         if self.set == "multi":
             return f"multi_{self.formation}"

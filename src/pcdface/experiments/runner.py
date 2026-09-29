@@ -47,6 +47,7 @@ EXPERIMENTS: dict[str, str] = {
     "e4": "pcdface.experiments.e4_speed",
     "e5": "pcdface.experiments.e5_sensitivity",
     "e6": "pcdface.experiments.e6_pose_expression",
+    "e7": "pcdface.experiments.e7_motion_blur",
 }
 
 
@@ -94,7 +95,13 @@ class RunContext:
     def device(self, name: str) -> str:
         if self.synthetic:
             return "tiruan (FakeDetector)"
-        return "GPU (Metal)" if self.cfg.detector(name).type == "mediapipe" else "CPU"
+        spec = self.cfg.detector(name)
+        if spec.type != "mediapipe":
+            return "CPU"
+        from pcdface.detection.mediapipe_detector import delegate_label, resolve_delegate
+
+        return delegate_label(resolve_delegate(spec.delegate))
+
 
     def table(self, df: pd.DataFrame, stem: str, title: str = "", notes: str = "") -> None:
         write_table(df, self.out_dir, stem, title, notes)
@@ -150,7 +157,7 @@ def _selected(names: list[str], cfg: Config) -> list[str]:
         chosen = ["e1", "e2", "e3", "e4"]
         if cfg.experiments.e5.enabled:
             chosen.append("e5")
-        return chosen + ["e6"]
+        return chosen + ["e6", "e7"]
     unknown = [n for n in names if n not in EXPERIMENTS]
     if unknown:
         raise ExperimentError(f"eksperimen tidak dikenal: {unknown}. Pilihan: {list(EXPERIMENTS)} atau all")
@@ -217,7 +224,8 @@ def run_experiments(
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("experiments", nargs="+", help="e1 e2 e3 e4 e5 e6 atau all")
+    parser.add_argument("experiments", nargs="+", help="e1 … e7 atau all")
+
 
     parser.add_argument("--synthetic", action="store_true", help="Pakai citra sintetis + FakeDetector (uji jalur)")
     parser.add_argument("--skip-validate", action="store_true", help="Jangan hentikan run bila validate menemukan galat")

@@ -69,7 +69,9 @@ def build_detector(
             min_detection_confidence=confidence,
             min_suppression_threshold=spec.min_suppression_threshold,
             running_mode=running_mode,
+            delegate=spec.delegate,
         )
+
 
     from pcdface.detection.ycbcr import YCbCrDetector
 

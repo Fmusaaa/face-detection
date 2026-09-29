@@ -55,6 +55,7 @@ class Record:
     session: str = ""
     pose: str = ""
     expression: str = ""
+    occlusion: str = ""
     labels: dict[str, str] = field(default_factory=dict)  # detektor, mode, resolusi, enhancement
 
     def to_json(self) -> str:
@@ -68,12 +69,16 @@ def run_records(
     scale: float = 1.0,
     enhancement: str = "none",
     labels: dict[str, str] | None = None,
+    degrade: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> list[Record]:
-    """Jalankan detektor pada sampel. Enhancement dan perkecilan tidak ikut diukur waktunya."""
+    """Jalankan detektor pada sampel. Enhancement, degradasi (mis. blur E7), dan
+    perkecilan tidak ikut diukur waktunya."""
     pre = cfg.preprocessing
     records = []
     for sample in samples:
         image = enhance(sample.load(), enhancement, pre.clahe_clip_limit, pre.clahe_tile_grid)
+        if degrade is not None:
+            image = degrade(image)
         image = scale_image(image, scale)
         result = detector.detect(image)
         meta = sample.meta
@@ -84,7 +89,8 @@ def run_records(
             elapsed_ms=result.elapsed_ms, width=image.shape[1], height=image.shape[0],
             distance_cm=meta.distance_cm, lighting=meta.lighting, formation=meta.formation,
             positions_cm=tuple(meta.positions_cm), luma_mean=meta.luma_mean, session=meta.session,
-            pose=meta.pose, expression=meta.expression,
+            pose=meta.pose, expression=meta.expression, occlusion=meta.occlusion,
+
             labels=dict(labels or {}),
         ))
     return records

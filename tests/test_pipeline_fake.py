@@ -16,15 +16,17 @@ EXPECTED_TABLES = {
     "e4": ["e4_kecepatan"],
     "e5": ["e5_sensitivitas_haar"],
     "e6": ["e6_ringkasan", "e6_pose", "e6_per_sumbu", "e6_batas_sudut", "e6_pose_vs_depan", "e6_ekspresi",
-           "e6_ekspresi_vs_netral", "e6_perbandingan"],
+           "e6_ekspresi_vs_netral", "e6_oklusi", "e6_oklusi_vs_tanpa", "e6_perbandingan"],
+    "e7": ["e7_ringkasan", "e7_recall_per_jarak", "e7_vs_asli", "e7_perbandingan"],
 }
 
 
 @pytest.fixture(scope="module")
 def outputs(small_cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("results")
-    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5", "e6"], synthetic=True, results_root=root,
+    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], synthetic=True, results_root=root,
                            plots=False)
+
 
 
 

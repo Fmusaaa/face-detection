@@ -6,10 +6,11 @@ Contoh:
     python -m pcdface capture --set pose --subject S03 --distance 100 --pose kiri30
     python -m pcdface capture --set pose --subject S03 --distance 200 --pose semua
     python -m pcdface capture --set ekspresi --subject S03 --expression semua
+    python -m pcdface capture --set oklusi --subject S03 --occlusion semua
     python -m pcdface capture --set multi --formation F5 --subjects S02,S05,S01
     python -m pcdface capture --set kosong
 
-`--pose semua` / `--expression semua` merekam semua level dari config
+`--pose semua` / `--expression semua` / `--occlusion semua` merekam semua level dari config
 berurutan dalam satu jendela; instruksi kondisi berikutnya tampil di layar.
 
 Tombol: SPASI simpan frame, q/ESC keluar.
@@ -61,6 +62,13 @@ CHECKLIST = (
 
 SESSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]{0,39}$")
 ALL_LEVELS = "semua"
+CONDITION_SETS = ("pose", "ekspresi", "oklusi")   # 3 frame per level, cahaya normal
+OCCLUSION_HINTS = {
+    "tanpa": "TANPA penutup wajah (kacamata bening biasa boleh), tatap lensa",
+    "masker": "pakai MASKER menutupi hidung dan mulut, tatap lensa",
+    "tangan": "TELAPAK TANGAN menutupi mulut dan dagu, tatap lensa",
+    "kacamata_hitam": "pakai KACAMATA HITAM, tatap lensa",
+}
 
 
 @dataclass(frozen=True)
@@ -79,17 +87,21 @@ class CapturePlan:
             return f"pose {spec.subject_id} {spec.distance_cm} cm {spec.pose}"
         if spec.set == "ekspresi":
             return f"ekspresi {spec.subject_id} {spec.distance_cm} cm {spec.expression}"
+        if spec.set == "oklusi":
+            return f"oklusi {spec.subject_id} {spec.distance_cm} cm {spec.occlusion}"
         if spec.set == "multi":
             layout = ", ".join(f"{s}@{p}cm" for s, p in zip(spec.subjects, self.positions_cm))
             return f"multi {spec.formation}: {layout} (kiri → kanan)"
         return "kosong (tanpa wajah)"
 
     def instruction(self) -> str:
-        """Arahan untuk peserta pada set pose dan ekspresi; kosong untuk set lain."""
+        """Arahan untuk peserta pada set pose, ekspresi, dan oklusi; kosong untuk set lain."""
         if self.spec.set == "pose":
             return parse_pose(self.spec.pose).describe()
         if self.spec.set == "ekspresi":
             return f"ekspresi {self.spec.expression.upper()}, tatap lensa"
+        if self.spec.set == "oklusi":
+            return OCCLUSION_HINTS.get(self.spec.occlusion, f"oklusi {self.spec.occlusion.upper()}, tatap lensa")
         return ""
 
 
@@ -97,7 +109,7 @@ def build_plan(args: argparse.Namespace, cfg: Config, paths: ProjectPaths) -> Ca
     """Validasi argumen terhadap config dan persetujuan peserta. ValueError bila salah."""
     ds = cfg.dataset
     subjects = read_subjects(paths.subjects)
-    default_count = ds.pose_frames_per_condition if args.set in ("pose", "ekspresi") else ds.frames_per_condition
+    default_count = ds.pose_frames_per_condition if args.set in CONDITION_SETS else ds.frames_per_condition
     count = args.count if args.count is not None else default_count
     if count < 1:
         raise ValueError("--count minimal 1")
@@ -121,13 +133,16 @@ def build_plan(args: argparse.Namespace, cfg: Config, paths: ProjectPaths) -> Ca
 
 
 def build_plans(args: argparse.Namespace, cfg: Config, paths: ProjectPaths) -> list[CapturePlan]:
-    """Satu rencana, atau satu per level bila `--pose semua` / `--expression semua`."""
+    """Satu rencana, atau satu per level bila `--pose/--expression/--occlusion semua`."""
     if args.set == "pose" and getattr(args, "pose", None) == ALL_LEVELS:
         return [build_plan(argparse.Namespace(**{**vars(args), "pose": pose}), cfg, paths)
                 for pose in cfg.dataset.poses]
     if args.set == "ekspresi" and getattr(args, "expression", None) == ALL_LEVELS:
         return [build_plan(argparse.Namespace(**{**vars(args), "expression": expression}), cfg, paths)
                 for expression in cfg.dataset.expressions]
+    if args.set == "oklusi" and getattr(args, "occlusion", None) == ALL_LEVELS:
+        return [build_plan(argparse.Namespace(**{**vars(args), "occlusion": occlusion}), cfg, paths)
+                for occlusion in cfg.dataset.occlusions]
     return [build_plan(args, cfg, paths)]
 
 
@@ -142,7 +157,7 @@ def _build_spec(
     """Rencana rekam per set, tanpa sesi (sesi ditambahkan oleh build_plan)."""
     if args.set in SINGLE_FACE_SETS:
         require_consent(args.subject)
-        if args.set in ("pose", "ekspresi") and args.lighting != "normal":
+        if args.set in CONDITION_SETS and args.lighting != "normal":
             raise ValueError(f"set {args.set} selalu cahaya normal")
         if args.set == "jarak":
             if args.distance not in ds.distances_cm:
@@ -162,12 +177,17 @@ def _build_spec(
             if args.distance not in ds.pose_distances_cm:
                 raise ValueError(f"set pose butuh --distance salah satu dari {list(ds.pose_distances_cm)}")
             spec = CaptureSpec("pose", args.subject, args.distance, "normal", pose=args.pose)
-        else:
+        elif args.set == "ekspresi":
             expression = getattr(args, "expression", None)
             if expression not in ds.expressions:
                 raise ValueError(f"--expression harus salah satu dari {list(ds.expressions)} atau '{ALL_LEVELS}'")
             spec = CaptureSpec("ekspresi", args.subject, ds.reference_distance_cm, "normal", expression=expression)
-        if args.set in ("cahaya", "ekspresi") and args.distance not in (None, ds.reference_distance_cm):
+        else:
+            occlusion = getattr(args, "occlusion", None)
+            if occlusion not in ds.occlusions:
+                raise ValueError(f"--occlusion harus salah satu dari {list(ds.occlusions)} atau '{ALL_LEVELS}'")
+            spec = CaptureSpec("oklusi", args.subject, ds.reference_distance_cm, "normal", occlusion=occlusion)
+        if args.set in ("cahaya", "ekspresi", "oklusi") and args.distance not in (None, ds.reference_distance_cm):
             raise ValueError(f"set {args.set} selalu di jarak acuan {ds.reference_distance_cm} cm")
         return CapturePlan(spec, (), 1, count)
 
@@ -203,6 +223,7 @@ def make_row(plan: CapturePlan, relative_path: str, frame: np.ndarray) -> Metada
         lighting=spec.lighting,
         pose=spec.pose,
         expression=spec.expression,
+        occlusion=spec.occlusion,
         expected_faces=plan.expected_faces,
         luma_mean=mean_luma(frame),
         width=frame.shape[1],
@@ -249,12 +270,14 @@ def _draw_overlay(frame: np.ndarray, plan: CapturePlan, saved: int, step: str = 
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--set", required=True, help="jarak | cahaya | multi | kosong | pose | ekspresi")
+    parser.add_argument("--set", required=True, help="jarak | cahaya | multi | kosong | pose | ekspresi | oklusi")
     parser.add_argument("--subject", help="Kode peserta untuk set satu wajah, mis. S03")
     parser.add_argument("--distance", type=int, help="Jarak cm (set jarak dan pose)")
     parser.add_argument("--lighting", default="normal", help="normal | terang | redup | backlight")
     parser.add_argument("--pose", help="Pose (set pose), mis. depan, kiri30, menunduk30, atau 'semua'")
     parser.add_argument("--expression", help="Ekspresi (set ekspresi), mis. netral, marah, atau 'semua'")
+    parser.add_argument("--occlusion", help="Penutup wajah (set oklusi), mis. tanpa, masker, atau 'semua'")
+
 
     parser.add_argument("--formation", help="Formasi multi-wajah, mis. F5")
     parser.add_argument("--subjects", help="Peserta multi-wajah kiri → kanan DI CITRA, mis. S02,S05,S01")

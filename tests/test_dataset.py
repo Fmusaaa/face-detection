@@ -93,7 +93,7 @@ def test_synthetic_dataset_is_consistent(synthetic_paths, small_cfg):
     report = load_samples(synthetic_paths)
     assert not report.unannotated and not report.missing_files
     sets = {s.meta.set for s in report.samples}
-    assert sets == {"jarak", "cahaya", "multi", "kosong", "pose", "ekspresi"}
+    assert sets == {"jarak", "cahaya", "multi", "kosong", "pose", "ekspresi", "oklusi"}
     for sample in report.samples:
         assert len(sample.gt) == sample.meta.expected_faces
         if sample.meta.set == "multi":

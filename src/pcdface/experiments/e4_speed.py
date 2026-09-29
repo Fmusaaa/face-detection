@@ -54,5 +54,6 @@ def run(ctx: RunContext) -> None:
             ctx.log(f"{name} @ {res_label(resolution)}: median {median:.2f} ms")
     ctx.table(pd.DataFrame(rows), "e4_kecepatan", "E4 — waktu deteksi per frame",
               f"{e4.warmup_runs} warm-up dibuang, {e4.repeats} panggilan. Waktu baca berkas tidak dihitung. "
-              "Haar = CPU, MediaPipe = GPU (Metal): perbandingan implementasi pada perangkat ini, bukan algoritma "
-              "pada perangkat keras yang sama (PRD §8.5).")
+              "Kolom perangkat: Haar selalu CPU; MediaPipe GPU (Metal) di macOS. Bila berbeda, ini perbandingan "
+              "implementasi pada perangkat ini, bukan algoritma pada perangkat keras yang sama (PRD §8.5).")
+

@@ -32,7 +32,7 @@ from pcdface.dataset.metadata import (
     read_subjects,
 )
 from pcdface.paths import ProjectPaths
-from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_POSE
+from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_OCCLUSION, REFERENCE_POSE
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MIN_BOX_PX = 4
@@ -61,6 +61,7 @@ def _spec_of(row: MetadataRow) -> CaptureSpec:
         formation=row.formation,
         subjects=row.subjects,
         expression=row.expression,
+        occlusion=row.occlusion,
     )
 
 
@@ -83,6 +84,8 @@ def _check_row(row: MetadataRow, cfg: Config, subjects: dict[str, SubjectRow]) -
         error("kolom pose hanya untuk set pose")
     if row.expression and row.set != "ekspresi":
         error("kolom expression hanya untuk set ekspresi")
+    if row.occlusion and row.set != "oklusi":
+        error("kolom occlusion hanya untuk set oklusi")
 
     if row.set in SINGLE_FACE_SETS:
         if not SUBJECT_ID.match(row.subject_id):
@@ -103,12 +106,14 @@ def _check_row(row: MetadataRow, cfg: Config, subjects: dict[str, SubjectRow]) -
             error(f"set {row.set} harus di jarak acuan {ds.reference_distance_cm} cm")
         if row.set == "cahaya" and row.lighting == "normal":
             error("cahaya normal diambil dari set jarak, bukan set cahaya")
-        if row.set in ("pose", "ekspresi") and row.lighting != "normal":
+        if row.set in ("pose", "ekspresi", "oklusi") and row.lighting != "normal":
             error(f"set {row.set} harus cahaya normal")
         if row.set == "pose" and row.pose not in ds.poses:
             error(f"pose '{row.pose}' bukan salah satu dari {list(ds.poses)}")
         if row.set == "ekspresi" and row.expression not in ds.expressions:
             error(f"ekspresi '{row.expression}' bukan salah satu dari {list(ds.expressions)}")
+        if row.set == "oklusi" and row.occlusion not in ds.occlusions:
+            error(f"oklusi '{row.occlusion}' bukan salah satu dari {list(ds.occlusions)}")
     elif row.set == "multi":
         expected = ds.formations.get(row.formation)
         if expected is None:
@@ -161,19 +166,24 @@ def _reference_checks(rows: list[MetadataRow]) -> list[Issue]:
     issues: list[Issue] = []
     poses: dict[tuple[str, int | None], set[str]] = {}
     expressions: dict[str, set[str]] = {}
+    occlusions: dict[str, set[str]] = {}
     for row in rows:
         if row.set == "pose":
             poses.setdefault((row.subject_id, row.distance_cm), set()).add(row.pose)
         elif row.set == "ekspresi":
             expressions.setdefault(row.subject_id, set()).add(row.expression)
+        elif row.set == "oklusi":
+            occlusions.setdefault(row.subject_id, set()).add(row.occlusion)
     for (subject_id, distance), found in sorted(poses.items(), key=lambda item: (item[0][0], item[0][1] or 0)):
         if REFERENCE_POSE not in found:
             issues.append(Issue(WARNING, subject_id, f"set pose {distance} cm tanpa pose '{REFERENCE_POSE}' — "
                                                      "perbandingan terhadap acuan E6 tidak bisa dihitung"))
-    for subject_id, found in sorted(expressions.items()):
-        if REFERENCE_EXPRESSION not in found:
-            issues.append(Issue(WARNING, subject_id, f"set ekspresi tanpa '{REFERENCE_EXPRESSION}' — "
-                                                     "perbandingan terhadap acuan E6 tidak bisa dihitung"))
+    for set_name, levels, reference in (("ekspresi", expressions, REFERENCE_EXPRESSION),
+                                        ("oklusi", occlusions, REFERENCE_OCCLUSION)):
+        for subject_id, found in sorted(levels.items()):
+            if reference not in found:
+                issues.append(Issue(WARNING, subject_id, f"set {set_name} tanpa '{reference}' — "
+                                                         "perbandingan terhadap acuan E6 tidak bisa dihitung"))
     return issues
 
 
@@ -206,12 +216,14 @@ def _session_checks(rows: list[MetadataRow], reference_cm: int) -> list[Issue]:
             issues.append(Issue(WARNING, subject_id,
                                 f"set jarak terpecah di sesi {sorted(distance_sessions)} — pastikan posisi kamera dan "
                                 "tanda lakban identik (periksa e1_loglog_per_sesi)"))
-        for set_name in ("pose", "ekspresi"):
+        for set_name in ("pose", "ekspresi", "oklusi"):
             set_sessions = {r.session for r in own if r.set == set_name}
             if len(set_sessions) > 1:
                 issues.append(Issue(WARNING, subject_id,
                                     f"set {set_name} terpecah di sesi {sorted(set_sessions)} — acuan "
-                                    f"({REFERENCE_POSE}/{REFERENCE_EXPRESSION}) sebaiknya satu sesi dengan kondisi lain"))
+                                    f"({REFERENCE_POSE}/{REFERENCE_EXPRESSION}/{REFERENCE_OCCLUSION}) "
+                                    "sebaiknya satu sesi dengan kondisi lain"))
+
 
     luma: dict[str, list[float]] = {}
     for row in rows:

@@ -134,7 +134,8 @@ def _render(image: np.ndarray, row: MetadataRow, state: AnnotationState, view: V
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--set", default=None, help="Hanya satu set (jarak/cahaya/multi/kosong/pose/ekspresi)")
+    parser.add_argument("--set", default=None, help="Hanya satu set (jarak/cahaya/multi/kosong/pose/ekspresi/oklusi)")
+
 
     parser.add_argument("--start", type=int, default=None, help="Mulai dari citra ke-N (1 = pertama)")
     parser.add_argument("--display-scale", type=float, default=1.0,

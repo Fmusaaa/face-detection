@@ -9,7 +9,7 @@ Sistem **deteksi wajah saja** untuk UTS Pengolahan Citra Digital, sekaligus baha
 - **OpenCV Haar Cascade** — metode klasik (Viola-Jones)
 - **MediaPipe BlazeFace** — model *short-range* dan *full-range*
 
-Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kinerja pada 2–4 wajah sekaligus (RQ2), pencahayaan dan CLAHE (RQ3), pengaruh resolusi (RQ4), kecepatan (RQ5), dan titik lemah pose kepala serta ekspresi (RQ6).
+Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kinerja pada 2–4 wajah sekaligus (RQ2), pencahayaan dan CLAHE (RQ3), pengaruh resolusi (RQ4), kecepatan (RQ5), titik lemah pose kepala, ekspresi, dan wajah tertutup (RQ6), serta blur gerak (RQ7).
 
 **Tidak ada pengenalan identitas.** Tidak ada DeepFace, TensorFlow, *embedding*, atau database wajah. Versi v2 yang memakai DeepFace sudah dibatalkan. Kode v1 tidak dipakai — paket dibangun dari awal.
 
@@ -17,7 +17,7 @@ Pertanyaan utama: jarak optimal dan ukuran wajah minimum per detektor (RQ1), kin
 
 - Selalu kerja di `.venv` (`python3 -m venv .venv`, lalu `source .venv/bin/activate`). Python 3.14 bawaan Mac boleh dipakai.
 - **Hanya `opencv-contrib-python>=4.8,<5`.** Jangan pernah memasang `opencv-python` di environment yang sama — keduanya memasang modul `cv2` dan saling menimpa. MediaPipe menarik `opencv-contrib-python` tanpa batas versi; tanpa pin, yang terpasang OpenCV 5 yang tidak menyertakan berkas `haarcascade_*.xml`.
-- `mediapipe==1.0.1`, dipatok persis. Di macOS, delegate CPU-nya crash (`Check failed: service_ Service is unavailable` di `TensorsToDetectionsCalculator`), jadi MediaPipe **selalu** memakai `delegate=GPU` (Metal) dengan citra `SRGBA`. Konsekuensinya untuk E4 ada di PRD §8.5.
+- `mediapipe==1.0.1`, dipatok persis. Di macOS, delegate CPU-nya crash (`Check failed: service_ Service is unavailable` di `TensorsToDetectionsCalculator`), jadi di Mac MediaPipe **selalu** memakai `delegate=GPU` (Metal) dengan citra `SRGBA`. Config `delegate: auto` memilih GPU di macOS dan CPU di Windows/Linux (laptop anggota lain; jalur CPU belum diuji); `PCDFACE_MP_DELEGATE=cpu|gpu` menimpanya. Hasil penelitian hanya dari Mac proyek. Konsekuensinya untuk E4 ada di PRD §8.5.
 - Python dari python.org perlu `Install Certificates.command` sekali, kalau tidak unduhan model gagal dengan `CERTIFICATE_VERIFY_FAILED`.
 - Model `.tflite` ada di `models/`, diunduh dengan `python -m pcdface download-models`.
 
@@ -44,8 +44,8 @@ src/pcdface/
   detection/               base (DetectionResult), haar, mediapipe_detector, ycbcr, fake, registry
   evaluation/              matching, operating_point, average_precision, multiface, distance_analysis, stats
   pose.py                  nama pose (depan, kiri30, menunduk30, …) → sumbu + sudut
-  experiments/             e1..e6 + runner
-  reporting/               tables (CSV+MD), plots (10 grafik §10), report (RINGKASAN.md, contoh gambar terburam)
+  experiments/             e1..e7 + runner (e6 pose/ekspresi/oklusi, e7 blur gerak simulasi)
+  reporting/               tables (CSV+MD), plots (12 grafik §10), report (RINGKASAN.md, contoh gambar terburam)
   tools/                   download_models, capture, annotate, crop, validate, demo_realtime, forget
 ```
 
@@ -67,7 +67,8 @@ src/pcdface/
 6. **Mengubah keputusan PRD §12.2 setelah melihat hasil eksperimen.** Keputusan itu ditetapkan sebelum data diambil.
 7. **Menurunkan metrik titik operasi dari run ambang rendah.** Titik operasi dan kurva PR berasal dari dua run terpisah (PRD §8.2).
 8. **Memberi skor ≤ 0 ke `cv2.dnn.NMSBoxes`.** Skor ≤ ambang dibuang diam-diam. Geser `levelWeights` Haar menjadi `skor − min + 1` (lihat `detection/haar.py::nms_with_shifted_scores`).
-9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah. Set ekspresi (E6) hanyalah kondisi perekaman yang diperagakan peserta — sistem tidak pernah menebak ekspresi atau emosi.
+9. **Menambahkan pengenalan identitas**, DeepFace, TensorFlow, atau analisis atribut wajah. Set ekspresi dan oklusi (E6) hanyalah kondisi perekaman yang diperagakan peserta — sistem tidak pernah menebak ekspresi, emosi, atau benda yang dipakai.
+
 
 
 ## Cara kerja

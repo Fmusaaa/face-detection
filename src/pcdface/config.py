@@ -14,11 +14,13 @@ from typing import Any, Callable, Mapping
 import yaml
 
 from pcdface.paths import CONFIG_PATH, PROJECT_ROOT, ProjectPaths
-from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_POSE, parse_pose
+from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_OCCLUSION, REFERENCE_POSE, parse_pose
 
-SETS = ("jarak", "cahaya", "multi", "kosong", "pose", "ekspresi")
+SETS = ("jarak", "cahaya", "multi", "kosong", "pose", "ekspresi", "oklusi")
 ENHANCEMENTS = ("none", "clahe")
 DETECTOR_TYPES = ("haar", "mediapipe", "ycbcr")
+DELEGATES = ("auto", "gpu", "cpu")
+
 
 
 class ConfigError(ValueError):
@@ -47,6 +49,7 @@ class DatasetConfig:
     formations: dict[str, tuple[int, ...]]
     pose_distances_cm: tuple[int, ...] = (100,)
     expressions: tuple[str, ...] = (REFERENCE_EXPRESSION,)
+    occlusions: tuple[str, ...] = (REFERENCE_OCCLUSION,)
     pose_frames_per_condition: int = 3
 
 
@@ -70,6 +73,7 @@ class MediaPipeConfig:
     model: str
     min_detection_confidence: float
     min_suppression_threshold: float
+    delegate: str = "auto"          # auto | gpu | cpu — auto: GPU (Metal) di macOS, CPU di sistem lain
     type: str = "mediapipe"
 
 
@@ -153,6 +157,13 @@ class E6Config:
 
 
 @dataclass(frozen=True)
+class E7Config:
+    detectors: tuple[str, ...]
+    blur_px: tuple[int, ...]
+    blur_angle_deg: float
+
+
+@dataclass(frozen=True)
 class ExperimentsConfig:
     e1: E1Config
     e2: E2Config
@@ -160,6 +171,7 @@ class ExperimentsConfig:
     e4: E4Config
     e5: E5Config
     e6: E6Config
+    e7: E7Config
 
 
 @dataclass(frozen=True)
@@ -317,6 +329,8 @@ def _parse_detector(r: _Reader, name: str, spec: Mapping[str, Any]) -> DetectorC
             min_detection_confidence=r.get(spec, "min_detection_confidence", where, _float, _is_prob, "0–1"),
             min_suppression_threshold=r.get(spec, "min_suppression_threshold", where, _float, _is_prob, "0–1"),
         )
+        if "delegate" in spec:
+            values["delegate"] = r.get(spec, "delegate", where, _str, lambda v: v in DELEGATES, f"salah satu dari {DELEGATES}")
         return None if None in values.values() else MediaPipeConfig(**values)
 
     values = dict(
@@ -387,6 +401,8 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
                                 lambda v: len(v) > 0 and list(v) == sorted(set(v)), "naik, unik"),
         expressions=r.get(ds, "expressions", "dataset.", _list(_str),
                           lambda v: REFERENCE_EXPRESSION in v, f"memuat '{REFERENCE_EXPRESSION}' sebagai acuan"),
+        occlusions=r.get(ds, "occlusions", "dataset.", _list(_str),
+                         lambda v: REFERENCE_OCCLUSION in v, f"memuat '{REFERENCE_OCCLUSION}' sebagai acuan"),
         pose_frames_per_condition=r.get(ds, "pose_frames_per_condition", "dataset.", _int, lambda v: v > 0, "> 0"),
     )
     for pose in dataset.poses or ():
@@ -443,7 +459,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
     def section(key: str) -> dict[str, Any]:
         return r.section(ex, key, "experiments.")
 
-    e1, e2, e3, e4, e5, e6 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5", "e6"))
+    e1, e2, e3, e4, e5, e6, e7 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5", "e6", "e7"))
     experiments = ExperimentsConfig(
         e1=E1Config(
             detectors=r.get(e1, "detectors", "experiments.e1.", names),
@@ -469,10 +485,18 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
             min_neighbors=r.get(e5, "min_neighbors", "experiments.e5.", _list(_int), lambda v: len(v) > 0 and min(v) >= 0, ">= 0"),
         ),
         e6=E6Config(detectors=r.get(e6, "detectors", "experiments.e6.", names)),
+        e7=E7Config(
+            detectors=r.get(e7, "detectors", "experiments.e7.", names),
+            blur_px=r.get(e7, "blur_px", "experiments.e7.", _list(_int),
+                          lambda v: len(v) > 0 and min(v) >= 0 and 0 in v and list(v) == sorted(set(v)),
+                          "naik, unik, ≥ 0, memuat 0 sebagai acuan"),
+            blur_angle_deg=r.get(e7, "blur_angle_deg", "experiments.e7.", _float),
+        ),
     )
 
     for key, spec in (("e1", experiments.e1), ("e2", experiments.e2), ("e3", experiments.e3), ("e4", experiments.e4),
-                      ("e6", experiments.e6)):
+                      ("e6", experiments.e6), ("e7", experiments.e7)):
+
 
         for name in spec.detectors or ():
             if name not in det_raw:

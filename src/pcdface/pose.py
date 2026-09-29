@@ -1,7 +1,8 @@
-"""Nama pose → sumbu dan sudut nominal, serta acuan ekspresi (PRD §6.4, E6).
+"""Nama pose → sumbu dan sudut nominal, serta acuan ekspresi dan oklusi (PRD §6.4, E6).
 
-Ekspresi (`netral`, `senyum`, `marah`, …) hanya **kondisi perekaman** yang
-diperagakan peserta; sistem tidak pernah menebak ekspresi atau emosi.
+Ekspresi (`netral`, `senyum`, `marah`, …) dan oklusi (`masker`, `tangan`, …)
+hanya **kondisi perekaman** yang diperagakan peserta; sistem tidak pernah
+menebak ekspresi, emosi, atau benda yang dipakai.
 
 Nama pose di config dan metadata berbentuk `<arah><sudut>`:
 
@@ -21,6 +22,8 @@ from dataclasses import dataclass
 
 REFERENCE_POSE = "depan"
 REFERENCE_EXPRESSION = "netral"
+REFERENCE_OCCLUSION = "tanpa"
+
 
 AXES = {
     "kiri": "menoleh",

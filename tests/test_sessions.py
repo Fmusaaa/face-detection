@@ -36,7 +36,7 @@ def test_session_roundtrip(tmp_path):
 
 
 def capture_args(**overrides):
-    base = dict(set="jarak", subject="S01", distance=150, lighting="normal", pose=None, expression=None,
+    base = dict(set="jarak", subject="S01", distance=150, lighting="normal", pose=None, expression=None, occlusion=None,
                 formation=None, subjects=None, count=None, camera=None, session=None)
     base.update(overrides)
     return argparse.Namespace(**base)

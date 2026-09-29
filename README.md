@@ -2,7 +2,8 @@
 
 Proyek UTS Pengolahan Citra Digital (+ bahan jurnal). Membandingkan **OpenCV Haar Cascade** dengan
 **MediaPipe BlazeFace** (short-range, full-range) berdasarkan jarak, jumlah wajah, pencahayaan,
-resolusi, dan kecepatan. **Hanya deteksi** — tidak ada pengenalan identitas.
+resolusi, kecepatan, pose kepala, ekspresi, penutup wajah, dan blur gerak. **Hanya deteksi** — tidak
+ada pengenalan identitas.
 
 Spesifikasi lengkap: [`docs/PRD.md`](docs/PRD.md). Konteks untuk Claude Code: [`CLAUDE.md`](CLAUDE.md).
 
@@ -21,6 +22,11 @@ python -m pcdface selftest
   `download-models` gagal dengan `CERTIFICATE_VERIFY_FAILED`.
 - **Hanya** `opencv-contrib-python<5` — jangan pasang `opencv-python` di `.venv` yang sama.
 - MediaPipe 1.0.1 di macOS berjalan lewat GPU (Metal); delegate CPU-nya crash (PRD §5.2).
+- **Windows / Linux:** `delegate: auto` otomatis memakai CPU. Aktivasi venv di Windows:
+  `.venv\Scripts\activate`. Jalur ini belum pernah diuji — jalankan `pytest` dan
+  `python -m pcdface run all --synthetic` dulu, lalu kabari bila gagal. Angka hasil penelitian
+  tetap dijalankan di Mac proyek (PRD §12.2 butir 11).
+
 
 ## Hari pengambilan data
 
@@ -31,8 +37,8 @@ python -m pcdface selftest
    Tempel lakban di lantai pada 50, 100, 150, 200, 250, 300 cm, dan titik penanda toleh di dinding
    setinggi mata (30° dan 60°, PRD §6.4).
 4. Rekam. Data boleh diambil di beberapa pertemuan — beri satu kode sesi per pertemuan dan rekam
-   **seluruh set jarak, cahaya, pose, dan ekspresi seorang peserta dalam sesi yang sama** (PRD §6.2).
-   Contoh untuk satu peserta (±35 menit):
+   **seluruh set jarak, cahaya, pose, ekspresi, dan oklusi seorang peserta dalam sesi yang sama** (PRD §6.2).
+   Siapkan satu masker dan satu kacamata hitam. Contoh untuk satu peserta (±40 menit):
 
 ```bash
 SESI=2026-10-01-sore
@@ -40,10 +46,11 @@ for d in 50 100 150 200 250 300; do python -m pcdface capture --session $SESI --
 for l in terang redup backlight; do python -m pcdface capture --session $SESI --set cahaya --subject S01 --lighting $l; done
 for d in 100 200; do python -m pcdface capture --session $SESI --set pose --subject S01 --distance $d --pose semua; done
 python -m pcdface capture --session $SESI --set ekspresi --subject S01 --expression semua
+python -m pcdface capture --session $SESI --set oklusi --subject S01 --occlusion semua
 ```
 
-   `--pose semua` dan `--expression semua` merekam semua level berurutan (3 frame per level);
-   instruksi pose/ekspresi berikutnya tampil di bagian atas layar. Kiri/kanan = kiri/kanan **peserta**.
+   `--pose/--expression/--occlusion semua` merekam semua level berurutan (3 frame per level);
+   instruksi berikutnya tampil di bagian atas layar. Kiri/kanan = kiri/kanan **peserta**.
 
    Multi-wajah — urutan `--subjects` adalah urutan **kiri → kanan di layar** (pratinjau tidak dicerminkan):
 
@@ -61,8 +68,9 @@ python -m pcdface capture --session $SESI --set kosong --count 20
 python -m pcdface annotate          # kotak manual: garis rambut → dagu, pipi → pipi, tanpa telinga
 python -m pcdface validate          # harus 0 galat sebelum eksperimen
 python -m pcdface crop              # ekspor crop + lebar wajah per jarak
-python -m pcdface run all           # E1–E4 dan E6 (E5 bila experiments.e5.enabled)
-python -m pcdface report            # results/RINGKASAN.md + 10 grafik
+python -m pcdface run all           # E1–E7 (E7 memakai ulang set jarak dengan blur simulasi)
+python -m pcdface report            # results/RINGKASAN.md + 12 grafik
+
 
 python -m pcdface report --examples 4   # contoh gambar; wajah tanpa izin publikasi diburamkan
 python -m pcdface demo              # demo webcam; 1/2/3 atau d = ganti detektor

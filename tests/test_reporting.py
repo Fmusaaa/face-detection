@@ -1,4 +1,4 @@
-"""Tabel Markdown, sepuluh grafik, ringkasan, contoh gambar dengan pemburaman, demo."""
+"""Tabel Markdown, dua belas grafik, ringkasan, contoh gambar dengan pemburaman, demo."""
 
 import argparse
 
@@ -19,7 +19,8 @@ FIGURES = {
     "e2": ["grafik5_kurva_pr_e2", "grafik6_akurasi_hitung"],
     "e3": ["grafik7_f1_cahaya"],
     "e4": ["grafik8_kecepatan"],
-    "e6": ["grafik9_recall_pose", "grafik10_recall_ekspresi"],
+    "e6": ["grafik9_recall_pose", "grafik10_recall_ekspresi", "grafik11_recall_oklusi"],
+    "e7": ["grafik12_recall_blur"],
 }
 
 
@@ -36,7 +37,8 @@ def test_markdown_merges_intervals_and_uses_decimal_comma():
 @pytest.fixture(scope="module")
 def results(small_cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("results_plots")
-    run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e6"], synthetic=True, results_root=root, plots=True)
+    run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e6", "e7"], synthetic=True, results_root=root, plots=True)
+
     return root
 
 

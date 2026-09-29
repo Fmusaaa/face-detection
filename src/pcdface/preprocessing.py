@@ -55,3 +55,20 @@ def mean_luma(image_bgr: np.ndarray) -> float:
         return float(np.mean(image_bgr))
     ycrcb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2YCrCb)
     return float(np.mean(ycrcb[:, :, 0]))
+
+
+def motion_blur(image_bgr: np.ndarray, length_px: int, angle_deg: float = 0.0) -> np.ndarray:
+    """Blur gerak linear (simulasi E7): rerata `length_px` piksel sepanjang arah `angle_deg`.
+
+    0° = horizontal (kepala/badan bergerak ke samping). `length_px` ≤ 1 → citra tidak diubah.
+    Ini degradasi uji, bukan enhancement — tidak pernah dipakai di eksperimen lain.
+    """
+    if length_px <= 1:
+        return image_bgr
+    kernel = np.zeros((length_px, length_px), dtype=np.float32)
+    kernel[length_px // 2, :] = 1.0
+    center = ((length_px - 1) / 2.0, (length_px - 1) / 2.0)
+    rotation = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+    kernel = cv2.warpAffine(kernel, rotation, (length_px, length_px), flags=cv2.INTER_LINEAR)
+    kernel /= kernel.sum()
+    return cv2.filter2D(image_bgr, -1, kernel, borderType=cv2.BORDER_REFLECT)

@@ -1,22 +1,24 @@
-"""E6 — Pose dan ekspresi (PRD §9, RQ6, H5).
+"""E6 — Pose, ekspresi, dan oklusi (PRD §9, RQ6, H5).
 
-Data: set pose (tiap pose di setiap `pose_distances_cm`), set ekspresi (jarak
-acuan), set kosong untuk FPPI. Resolusi asli, tanpa enhancement, parameter
-detektor bawaan (titik operasi). Bootstrap per peserta.
+Data: set pose (tiap pose di setiap `pose_distances_cm`), set ekspresi dan set
+oklusi (jarak acuan), set kosong untuk FPPI. Resolusi asli, tanpa enhancement,
+parameter detektor bawaan (titik operasi). Bootstrap per peserta.
 
-Yang diukur: di pose/ekspresi mana detektor mulai kehilangan wajah, dan
-seberapa jauh recall turun dibanding acuan (`depan` / `netral`) pada peserta
-yang sama. Ekspresi hanyalah kondisi yang diperagakan peserta — sistem tidak
-menebak ekspresi.
+Yang diukur: di pose/ekspresi/penutup wajah mana detektor mulai kehilangan
+wajah, dan seberapa jauh recall turun dibanding acuan (`depan` / `netral` /
+`tanpa`) pada peserta yang sama. Ekspresi dan oklusi hanyalah kondisi yang
+diperagakan peserta — sistem tidak menebaknya.
 
 Tabel:
-- e6_ringkasan            recall seluruh set pose / ekspresi dan FPPI kosong per detektor
+- e6_ringkasan            recall seluruh set pose / ekspresi / oklusi dan FPPI kosong per detektor
 - e6_pose                 recall (Wilson), FP, rerata IoU & skor per detektor × jarak × pose
 - e6_per_sumbu            recall per sumbu × sudut, kiri+kanan digabung (grafik 9)
 - e6_batas_sudut          sudut terbesar dengan recall ≥ target, per detektor × jarak × sumbu
 - e6_pose_vs_depan        selisih recall pose − depan, berpasangan per peserta
 - e6_ekspresi             recall per detektor × ekspresi (grafik 10)
 - e6_ekspresi_vs_netral   selisih recall ekspresi − netral, berpasangan per peserta
+- e6_oklusi               recall per detektor × penutup wajah (grafik 11)
+- e6_oklusi_vs_tanpa      selisih recall oklusi − tanpa, berpasangan per peserta
 - e6_perbandingan         selisih recall antar detektor pada citra yang sama, per kondisi
 """
 
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import itertools
 import math
+from dataclasses import dataclass
 from typing import Callable, Sequence
 
 import numpy as np
@@ -41,7 +44,32 @@ from pcdface.experiments.common import (
     verdict,
 )
 from pcdface.experiments.runner import ExperimentError, RunContext
-from pcdface.pose import AXIS_ORDER, REFERENCE_EXPRESSION, REFERENCE_POSE, parse_pose
+from pcdface.pose import AXIS_ORDER, REFERENCE_EXPRESSION, REFERENCE_OCCLUSION, REFERENCE_POSE, parse_pose
+
+
+@dataclass(frozen=True)
+class ConditionSet:
+    """Set satu faktor di jarak acuan: ekspresi atau oklusi."""
+
+    set: str            # nama set di metadata
+    field: str          # atribut Record yang menyimpan level
+    column: str         # nama kolom di tabel
+    reference: str      # level acuan
+    stem: str           # tabel recall
+    versus_stem: str    # tabel selisih terhadap acuan
+    note: str
+
+    def level_of(self, record: Record) -> str:
+        return getattr(record, self.field)
+
+
+CONDITION_SETS = (
+    ConditionSet("ekspresi", "expression", "ekspresi", REFERENCE_EXPRESSION, "e6_ekspresi", "e6_ekspresi_vs_netral",
+                 "Ekspresi diperagakan peserta, bukan ditebak sistem."),
+    ConditionSet("oklusi", "occlusion", "oklusi", REFERENCE_OCCLUSION, "e6_oklusi", "e6_oklusi_vs_tanpa",
+                 "'tanpa' = wajah tanpa penutup (kacamata bening biasa tetap dipakai). Kotak manual tetap "
+                 "garis rambut–dagu, termasuk bagian yang tertutup."),
+)
 
 
 def hit_score(record: Record, iou: float) -> float:
@@ -94,9 +122,9 @@ def run(ctx: RunContext) -> None:
     cfg = ctx.cfg
     ds, ev = cfg.dataset, cfg.evaluation
     iou, level = ev.iou_primary, cfg.stats.ci_level
-    samples = ctx.samples(("pose", "ekspresi", "kosong"))
-    if not any(s.meta.set in ("pose", "ekspresi") for s in samples):
-        raise ExperimentError("set pose dan ekspresi belum punya citra beranotasi")
+    samples = ctx.samples(("pose", "ekspresi", "oklusi", "kosong"))
+    if not any(s.meta.set in ("pose", "ekspresi", "oklusi") for s in samples):
+        raise ExperimentError("set pose, ekspresi, dan oklusi belum punya citra beranotasi")
     detectors = list(cfg.experiments.e6.detectors)
 
     runs: dict[str, list[Record]] = {}
@@ -113,25 +141,32 @@ def run(ctx: RunContext) -> None:
     poses = [p for p in ds.poses if any(s.meta.set == "pose" and s.meta.pose == p for s in samples)]
     distances = [d for d in ds.pose_distances_cm
                  if any(s.meta.set == "pose" and s.meta.distance_cm == d for s in samples)]
-    expressions = [e for e in ds.expressions if any(s.meta.expression == e for s in samples)]
+    levels_of = {"ekspresi": ds.expressions, "oklusi": ds.occlusions}
+    condition_levels = {
+        c.set: [v for v in levels_of[c.set]
+                if any(s.meta.set == c.set and getattr(s.meta, c.field) == v for s in samples)]
+        for c in CONDITION_SETS
+    }
 
     def pose_records(name: str, distance: int, keep: Callable[[str], bool]) -> list[Record]:
         return select(name, lambda r: r.set == "pose" and r.distance_cm == distance and keep(r.pose))
 
-    def expression_records(name: str, expression: str | None = None) -> list[Record]:
-        return select(name, lambda r: r.set == "ekspresi" and (expression is None or r.expression == expression))
+    def condition_records(name: str, condition: ConditionSet, value: str | None = None) -> list[Record]:
+        return select(name, lambda r: r.set == condition.set and (value is None or condition.level_of(r) == value))
 
     # --- ringkasan ---------------------------------------------------------
     summary = []
     for name in detectors:
         row: dict[str, float | str] = {"detektor": name}
-        for label, subset in (("pose", select(name, lambda r: r.set == "pose")), ("ekspresi", expression_records(name))):
+        subsets = [("pose", select(name, lambda r: r.set == "pose"))]
+        subsets += [(c.set, condition_records(name, c)) for c in CONDITION_SETS]
+        for label, subset in subsets:
             evals = evaluate(subset, iou)
             tp, fn = sum(e.tp for e in evals), sum(e.fn for e in evals)
             row.update(wilson(tp, tp + fn, level).as_dict(f"recall_{label}"))
         row["fppi_kosong"] = fppi(select(name, lambda r: r.set == "kosong"), iou)
         summary.append(row)
-    ctx.table(pd.DataFrame(summary), "e6_ringkasan", "E6 — ringkasan pose dan ekspresi",
+    ctx.table(pd.DataFrame(summary), "e6_ringkasan", "E6 — ringkasan pose, ekspresi, dan oklusi",
               f"IoU {iou}. Recall: Wilson {level:.0%}. Parameter detektor bawaan, tanpa enhancement.")
 
     # --- pose ----------------------------------------------------------------
@@ -183,24 +218,26 @@ def run(ctx: RunContext) -> None:
         ctx.table(pd.DataFrame(versus_rows), "e6_pose_vs_depan", "E6 — selisih recall pose − depan (peserta sama)",
                   "Bootstrap berpasangan per peserta; acuan = pose depan di jarak yang sama.")
 
-    # --- ekspresi --------------------------------------------------------------
-    if expressions:
-        expression_rows, versus_rows = [], []
+    # --- ekspresi dan oklusi ---------------------------------------------------
+    for condition in CONDITION_SETS:
+        values = condition_levels[condition.set]
+        if not values:
+            continue
+        level_rows, versus_rows = [], []
         for name in detectors:
-            reference = expression_records(name, REFERENCE_EXPRESSION)
-            for expression in expressions:
-                subset = expression_records(name, expression)
-                expression_rows.append({"detektor": name, "ekspresi": expression, **condition_row(subset, iou, level)})
-                if expression != REFERENCE_EXPRESSION and reference:
+            reference = condition_records(name, condition, condition.reference)
+            for value in values:
+                subset = condition_records(name, condition, value)
+                level_rows.append({"detektor": name, condition.column: value, **condition_row(subset, iou, level)})
+                if value != condition.reference and reference:
                     diff = paired_conditions(subset, reference, iou, cfg, metric="recall")
-                    versus_rows.append({"detektor": name, "ekspresi": expression,
+                    versus_rows.append({"detektor": name, condition.column: value,
                                         **diff.as_dict("selisih_recall"), "kesimpulan": versus_reference(diff)})
-
-        ctx.table(pd.DataFrame(expression_rows), "e6_ekspresi", "E6 — recall per detektor × ekspresi",
-                  f"Di {ds.reference_distance_cm} cm, wajah menghadap kamera. Ekspresi diperagakan peserta, "
-                  "bukan ditebak sistem.")
-        ctx.table(pd.DataFrame(versus_rows), "e6_ekspresi_vs_netral",
-                  "E6 — selisih recall ekspresi − netral (peserta sama)", "Bootstrap berpasangan per peserta.")
+        ctx.table(pd.DataFrame(level_rows), condition.stem, f"E6 — recall per detektor × {condition.column}",
+                  f"Di {ds.reference_distance_cm} cm, wajah menghadap kamera. {condition.note}")
+        ctx.table(pd.DataFrame(versus_rows), condition.versus_stem,
+                  f"E6 — selisih recall {condition.column} − {condition.reference} (peserta sama)",
+                  "Bootstrap berpasangan per peserta.")
 
     # --- antar detektor pada citra yang sama -----------------------------------
     conditions: list[tuple[str, str, Callable[[Record], bool]]] = []
@@ -208,8 +245,10 @@ def run(ctx: RunContext) -> None:
         for pose in poses:
             conditions.append((f"pose {distance} cm", pose,
                                lambda r, d=distance, p=pose: r.set == "pose" and r.distance_cm == d and r.pose == p))
-    for expression in expressions:
-        conditions.append(("ekspresi", expression, lambda r, e=expression: r.set == "ekspresi" and r.expression == e))
+    for condition in CONDITION_SETS:
+        for value in condition_levels[condition.set]:
+            conditions.append((condition.set, value,
+                               lambda r, c=condition, v=value: r.set == c.set and c.level_of(r) == v))
     compare_rows = []
     for a, b in itertools.combinations(detectors, 2):
         for group, condition, keep in conditions:

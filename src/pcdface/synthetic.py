@@ -68,6 +68,7 @@ class FaceSpec:
     tone: tuple[int, int, int]
     pose: str = ""
     expression: str = ""
+    occlusion: str = ""
 
 
 def face_width_px(distance_cm: float, focal_px: float, face_width_cm: float) -> int:
@@ -142,7 +143,37 @@ def _draw_person(canvas: np.ndarray, mask: np.ndarray, face: FaceSpec) -> Box:
         start, end = (180, 360) if face.expression == "marah" else (0, 180)
         cv2.ellipse(canvas, mouth, (max(int(0.18 * w * scale), 1), max(int(0.035 * h * scale), 1)),
                     0, start, end, (45, 45, 110), -1, cv2.LINE_AA)
+    _draw_occlusion(canvas, face, (cx, cy, w, h), (dx, dy))
     return (cx - half_w, top, w, h)
+
+
+MASK_BGR = (225, 205, 170)          # masker biru muda
+SUNGLASS_BGR = (25, 25, 25)
+
+
+def _draw_occlusion(canvas: np.ndarray, face: FaceSpec, geometry: tuple[int, int, int, int],
+                    shift: tuple[float, float]) -> None:
+    """Masker, tangan, atau kacamata hitam di atas wajah (set oklusi). Kotak manual tidak berubah."""
+    cx, cy, w, h = geometry
+    dx, dy = shift
+    if face.occlusion == "masker":
+        cv2.ellipse(canvas, (int(cx + dx), int(cy + 0.22 * h + dy)), (max(int(0.48 * w), 1), max(int(0.26 * h), 1)),
+                    0, 0, 360, MASK_BGR, -1, cv2.LINE_AA)
+    elif face.occlusion == "tangan":
+        palm = tuple(int(min(255, c * 1.08)) for c in face.tone)
+        cv2.ellipse(canvas, (int(cx + dx), int(cy + 0.3 * h + dy)), (max(int(0.4 * w), 1), max(int(0.2 * h), 1)),
+                    0, 0, 360, palm, -1, cv2.LINE_AA)
+        for k in range(-2, 3):
+            x = int(cx + dx + k * 0.12 * w)
+            cv2.line(canvas, (x, int(cy + 0.15 * h + dy)), (x, int(cy + 0.45 * h + dy)),
+                     tuple(int(c * 0.8) for c in face.tone), max(1, w // 60), cv2.LINE_AA)
+    elif face.occlusion == "kacamata_hitam":
+        eye_y = int(cy - 0.08 * h + dy)
+        for sign in (-1, 1):
+            cv2.ellipse(canvas, (int(cx + sign * 0.2 * w + dx), eye_y), (max(int(0.15 * w), 1), max(int(0.08 * h), 1)),
+                        0, 0, 360, SUNGLASS_BGR, -1, cv2.LINE_AA)
+        cv2.line(canvas, (int(cx - 0.06 * w + dx), eye_y), (int(cx + 0.06 * w + dx), eye_y),
+                 SUNGLASS_BGR, max(1, w // 40), cv2.LINE_AA)
 
 
 def _compose(background: np.ndarray, people: np.ndarray, mask: np.ndarray,
@@ -206,6 +237,7 @@ def _row(spec: CaptureSpec, rel: str, image: np.ndarray, expected: int,
         lighting=spec.lighting,
         pose=spec.pose,
         expression=spec.expression,
+        occlusion=spec.occlusion,
         expected_faces=expected,
         luma_mean=mean_luma(image),
         width=image.shape[1],
@@ -240,7 +272,7 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
         rows.append(_row(spec, rel, image, len(boxes), positions))
         annotations[rel] = boxes
 
-    def single_face(sid: str, distance: int, pose: str = "", expression: str = "") -> FaceSpec:
+    def single_face(sid: str, distance: int, pose: str = "", expression: str = "", occlusion: str = "") -> FaceSpec:
         w = face_width_px(distance * float(rng.uniform(0.97, 1.03)), syn.focal_px, syn.face_width_cm)
         return FaceSpec(
             center_x=int(width / 2 + rng.integers(-60, 61)),
@@ -249,6 +281,7 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
             tone=tones[sid],
             pose=pose,
             expression=expression,
+            occlusion=occlusion,
         )
 
     for sid in subject_ids:
@@ -275,6 +308,12 @@ def generate_dataset(cfg: Config, data_root: Path, seed: int | None = None) -> P
             image, boxes = render_scene(width, height, [single_face(sid, ds.reference_distance_cm, expression=expression)],
                                         "normal", rng)
             save(spec, 1, image, boxes)
+        for occlusion in ds.occlusions:
+            spec = CaptureSpec(set="oklusi", subject_id=sid, distance_cm=ds.reference_distance_cm, occlusion=occlusion)
+            image, boxes = render_scene(width, height, [single_face(sid, ds.reference_distance_cm, occlusion=occlusion)],
+                                        "normal", rng)
+            save(spec, 1, image, boxes)
+
 
 
     rotation = 0

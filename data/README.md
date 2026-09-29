@@ -32,6 +32,7 @@ data/
     ├── cahaya/S01/cahaya_S01_100cm_redup_02.jpg
     ├── pose/S01/pose_S01_200cm_kiri60_01.jpg
     ├── ekspresi/S01/ekspresi_S01_100cm_marah_03.jpg
+    ├── oklusi/S01/oklusi_S01_100cm_masker_01.jpg
     ├── multi/F5/multi_F5_03.jpg
     └── kosong/kosong_07.jpg
 ```
@@ -60,7 +61,7 @@ S02,ya,ya,2026-09-30
 
 ## `metadata.csv` — diisi otomatis
 
-Kolom mengikuti PRD §6.6, ditambah empat kolom:
+Kolom mengikuti PRD §6.6, ditambah lima kolom:
 
 - `session` — kode sesi pengambilan (`capture --session`, bawaan tanggal hari itu). Data boleh
   diambil di beberapa pertemuan; aturannya di PRD §6.2.
@@ -72,4 +73,7 @@ Kolom mengikuti PRD §6.6, ditambah empat kolom:
   `configs/experiment.yaml`); kosong untuk set lain.
 - `expression` — untuk set ekspresi: `netral`, `senyum`, `marah`, `kaget`; kosong
   untuk set lain. Ekspresi hanya kondisi yang diperagakan, tidak ditebak sistem.
+- `occlusion` — untuk set oklusi: `tanpa`, `masker`, `tangan`, `kacamata_hitam`;
+  kosong untuk set lain.
+
 
