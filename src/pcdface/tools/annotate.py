@@ -32,12 +32,15 @@ from pcdface.config import Config
 from pcdface.dataset.annotations import load_annotations, save_annotations
 from pcdface.dataset.metadata import MetadataRow, read_metadata
 from pcdface.paths import ProjectPaths
+from pcdface.tools.keys import lower_key
 
 WINDOW = "Anotasi - pcdface"
 ZOOM_LEVELS = (1, 2, 4)
 MIN_DRAG_PX = 3
-KEY_LEFT = {2, 81, 63234, 65361}
-KEY_RIGHT = {3, 83, 63235, 65363}
+# Kode panah dari waitKeyEx: 2/3 (beberapa backend), macOS 63234/63235, Linux 65361/65363,
+# Windows 2424832/2555904. Kode 81/83 sengaja tidak dipakai — sama dengan 'Q'/'S' saat Caps Lock.
+KEY_LEFT = {2, 63234, 65361, 2424832}
+KEY_RIGHT = {3, 63235, 65363, 2555904}
 
 
 @dataclass
@@ -196,7 +199,9 @@ def run(args: argparse.Namespace, cfg: Config, paths: ProjectPaths | None = None
                 key = cv2.waitKeyEx(20)
                 if key == -1:
                     continue
-                char = key & 0xFF
+                char = -1 if key in KEY_LEFT | KEY_RIGHT else lower_key(key)
+
+
                 if char in (ord("n"), ord("d")) or key in KEY_RIGHT:
                     commit(); move = 1
                 elif char in (ord("p"), ord("a")) or key in KEY_LEFT:

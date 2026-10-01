@@ -27,6 +27,8 @@ from pcdface.config import Config, MediaPipeConfig
 from pcdface.detection.base import DetectionResult, Detector
 from pcdface.detection.registry import build_detector
 from pcdface.preprocessing import ENHANCEMENTS, enhance
+from pcdface.tools.keys import lower_key
+
 
 WINDOW = "Demo deteksi wajah - pcdface"
 BOX = (0, 220, 60)
@@ -214,7 +216,8 @@ def run(args: argparse.Namespace, cfg: Config) -> int:
             draw_hud(canvas, current, cache.device(current), enhancement, len(result.boxes), result.elapsed_ms, fps)
             cv2.imshow(WINDOW, canvas)
 
-            key = cv2.waitKey(1) & 0xFF
+            key = lower_key(cv2.waitKey(1))
+            before = (current, enhancement)
             if key in (ord("q"), 27):
                 break
             if ord("1") <= key <= ord("9") and key - ord("1") < len(names):
@@ -229,7 +232,7 @@ def run(args: argparse.Namespace, cfg: Config) -> int:
                 path = folder / f"demo_{current}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
                 cv2.imwrite(str(path), canvas)
                 print(f"  tersimpan {path} — berisi wajah: jangan dibagikan tanpa izin")
-            if key != 255:
+            if (current, enhancement) != before:
                 print(f"  detektor={current} enhancement={enhancement}")
     finally:
         cache.close()

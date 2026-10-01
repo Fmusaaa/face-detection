@@ -208,3 +208,14 @@ def test_annotation_state_drag_and_delete():
     assert state.delete_at((55, 95))            # kotak terkecil yang memuat titik
     assert state.boxes == [(40, 80, 60, 120)]
     assert not state.delete_at((500, 500))
+
+
+def test_keys_ignore_caps_lock():
+    from pcdface.tools.annotate import KEY_LEFT, KEY_RIGHT
+    from pcdface.tools.keys import lower_key
+
+    assert lower_key(ord("S")) == ord("s") and lower_key(ord("s")) == ord("s")
+    assert lower_key(ord("Q")) == ord("q") and lower_key(ord("1")) == ord("1")
+    assert lower_key(27) == 27 and lower_key(0x100000 | ord("S")) == ord("s")   # bit modifier GTK
+    assert lower_key(-1) & 0xFF == 255                                             # tanpa tombol
+    assert not ({ord("Q"), ord("S")} & (KEY_LEFT | KEY_RIGHT))

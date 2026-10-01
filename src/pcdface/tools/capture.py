@@ -51,6 +51,8 @@ from pcdface.dataset.metadata import (
 from pcdface.paths import ProjectPaths
 from pcdface.pose import parse_pose
 from pcdface.preprocessing import mean_luma
+from pcdface.tools.keys import lower_key
+
 
 CHECKLIST = (
     "Sebelum merekam, pastikan (Control Center → Video Effects saat kamera aktif):",
@@ -329,7 +331,7 @@ def run(args: argparse.Namespace, cfg: Config, paths: ProjectPaths | None = None
                           f"{cfg.capture.width}×{cfg.capture.height}. Tidak ada yang disimpan.", file=sys.stderr)
                     return 1
                 cv2.imshow(window, _draw_overlay(frame, plan, saved, step))
-                key = cv2.waitKey(1) & 0xFF
+                key = lower_key(cv2.waitKey(1))
                 if key in (ord("q"), 27):
                     print(f"\nDihentikan. {total} foto tersimpan.")
                     return 0
