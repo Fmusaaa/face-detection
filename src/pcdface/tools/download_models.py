@@ -1,10 +1,10 @@
 """
-Pengunduh Model MediaPipe Face Detector
-=======================================
+Pengunduh Model Detektor Wajah
+==============================
 
-Mengunduh berkas model BlazeFace (.tflite) ke folder `models/` dan mencatat
-checksum SHA-256-nya di `models/checksums.txt` (format `shasum -a 256`),
-sehingga bisa diperiksa ulang dengan:
+Mengunduh berkas model BlazeFace (.tflite) dan YOLOv8n-face (.onnx) ke folder
+`models/` dan mencatat checksum SHA-256-nya di `models/checksums.txt` (format
+`shasum -a 256`), sehingga bisa diperiksa ulang dengan:
 
     cd models && shasum -a 256 -c checksums.txt
 
@@ -12,8 +12,13 @@ Bila berkas sudah ada, isinya diverifikasi terhadap checksum yang tercatat
 dan tidak diunduh ulang. Bila checksum tidak cocok, skrip berhenti dengan
 galat — berkas tidak ditimpa diam-diam kecuali memakai `--force`.
 
-URL diambil dari PRD §5.2. Bila salah satu gagal diunduh, galatnya dilaporkan
-apa adanya; skrip ini tidak mencari URL pengganti.
+URL diambil dari PRD §5.2 dan §5.3. Bila salah satu gagal diunduh, galatnya
+dilaporkan apa adanya; skrip ini tidak mencari URL pengganti.
+
+YOLOv8n-face adalah model derronqi/yolov8-face (dilatih pada WIDER FACE) dalam
+bentuk ONNX dari repo hpc203/yolov8-face-landmarks-opencv-dnn, dipatok ke satu
+commit. Model `.pt` lain (mis. `yolov8m-face` akanametov seperti repo referensi)
+harus diekspor dulu: `python -m pcdface export-yolo`.
 
 Pemakaian
 ---------
@@ -38,6 +43,9 @@ DEFAULT_MODELS_DIR = PROJECT_ROOT / "models"
 CHECKSUM_FILE = "checksums.txt"
 
 _BASE_URL = "https://storage.googleapis.com/mediapipe-models/face_detector"
+_YOLO_COMMIT = "1f91851f7d8d9475e5b4f0c1d6e5e385aa9bf0f4"
+_YOLO_URL = (f"https://raw.githubusercontent.com/hpc203/yolov8-face-landmarks-opencv-dnn/"
+             f"{_YOLO_COMMIT}/weights/yolov8n-face.onnx")
 
 # Berkas TFLite adalah FlatBuffer dengan penanda "TFL3" pada byte 4-7.
 # Dipakai untuk menolak halaman galat HTML yang tersimpan sebagai .tflite.
@@ -52,6 +60,7 @@ class ModelSpec:
     key: str
     filename: str
     url: str
+    kind: str = "tflite"            # tflite | onnx — menentukan pemeriksaan isi berkas
 
 
 MODELS: tuple[ModelSpec, ...] = (
@@ -69,6 +78,12 @@ MODELS: tuple[ModelSpec, ...] = (
         key="full_range_sparse",
         filename="blaze_face_full_range_sparse.tflite",
         url=f"{_BASE_URL}/blaze_face_full_range/float16/latest/blaze_face_full_range_sparse.tflite",
+    ),
+    ModelSpec(
+        key="yolov8n_face",
+        filename="yolov8n-face.onnx",
+        url=_YOLO_URL,
+        kind="onnx",
     ),
 )
 
@@ -108,18 +123,32 @@ def is_tflite(path: Path) -> bool:
     return len(header) == 8 and header[4:8] == _TFLITE_MAGIC
 
 
+def is_onnx(path: Path) -> bool:
+    """Periksa awal berkas ONNX (protobuf ModelProto: medan 1 `ir_version`, byte 0x08).
+
+    Pemeriksaan longgar, cukup untuk menolak halaman galat HTML/teks yang tersimpan sebagai .onnx.
+    """
+    with path.open("rb") as handle:
+        header = handle.read(2)
+    return len(header) == 2 and header[0] == 0x08
+
+
+def looks_valid(path: Path, kind: str) -> bool:
+    return is_onnx(path) if kind == "onnx" else is_tflite(path)
+
+
 def download(spec: ModelSpec, target: Path, timeout: float = 60.0) -> None:
     """Unduh ke berkas sementara lalu ganti nama, agar unduhan yang terputus
-    tidak meninggalkan berkas .tflite yang rusak."""
+    tidak meninggalkan berkas model yang rusak."""
     partial = target.with_suffix(target.suffix + ".part")
     try:
         with urllib.request.urlopen(spec.url, timeout=timeout) as response:
             with partial.open("wb") as handle:
                 for chunk in iter(lambda: response.read(_CHUNK_SIZE), b""):
                     handle.write(chunk)
-        if not is_tflite(partial):
+        if not looks_valid(partial, spec.kind):
             raise RuntimeError(
-                f"Berkas dari {spec.url} bukan model TFLite (penanda TFL3 tidak ada)."
+                f"Berkas dari {spec.url} bukan model {spec.kind.upper()} (isi awal berkas tidak cocok)."
             )
         partial.replace(target)
     finally:
@@ -209,7 +238,7 @@ def run(args: argparse.Namespace, models_dir: Path = DEFAULT_MODELS_DIR) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Unduh model MediaPipe Face Detector dan catat SHA-256-nya."
+        description="Unduh model detektor wajah (BlazeFace, YOLOv8n-face) dan catat SHA-256-nya."
     )
     add_arguments(parser)
     return run(parser.parse_args(argv))

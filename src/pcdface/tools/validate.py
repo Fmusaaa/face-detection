@@ -9,6 +9,8 @@ Yang diperiksa:
 - setiap peserta di foto terdaftar di subjects.csv dengan persetujuan penelitian
 - jumlah kotak anotasi = expected_faces, kotak berada di dalam citra
 - berkas yatim: foto tanpa metadata, anotasi tanpa metadata
+- izin pengenalan (PRD v4 §11): model LBPH tersimpan hanya boleh memuat peserta dengan
+  `consent_recognition`; peserta tanpa izin itu disebutkan (tidak ikut `enroll`/E8)
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from pcdface.dataset.metadata import (
 )
 from pcdface.paths import ProjectPaths
 from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_OCCLUSION, REFERENCE_POSE
+from pcdface.recognition.lbph import consenting_subjects, model_subjects
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 MIN_BOX_PX = 4
@@ -240,6 +243,22 @@ def _session_checks(rows: list[MetadataRow], reference_cm: int) -> list[Issue]:
     return issues
 
 
+def _recognition_checks(paths: ProjectPaths, subjects: dict[str, SubjectRow], used: set[str]) -> list[Issue]:
+    """Model LBPH hanya boleh memuat peserta yang mengizinkan pengenalan (templat biometrik)."""
+    issues = []
+    allowed = consenting_subjects(subjects)
+    for subject_id in model_subjects(paths.recognition):
+        if subject_id not in allowed:
+            issues.append(Issue(ERROR, f"{paths.recognition.name}/", f"model pengenalan memuat {subject_id} yang tidak "
+                                "mengizinkan pengenalan — latih ulang: python -m pcdface enroll"))
+    without = sorted(p for p in used if p in subjects and p not in allowed)
+    if without:
+        issues.append(Issue(WARNING, "subjects.csv", f"{len(without)} peserta belum mengizinkan pengenalan identitas "
+                            f"({', '.join(without)}) — tidak ikut enroll/E8. Isi consent_recognition setelah "
+                            "formulir v4 bagian 7 ditandatangani."))
+    return issues
+
+
 def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True) -> tuple[list[Issue], dict[str, int]]:
     """Kembalikan (daftar masalah, ringkasan jumlah citra per set)."""
     issues: list[Issue] = []
@@ -291,6 +310,7 @@ def validate_dataset(cfg: Config, paths: ProjectPaths, check_images: bool = True
     used = {person for row in rows for person in row.people}
     for subject_id in sorted(set(subjects) - used):
         issues.append(Issue(WARNING, subject_id, "terdaftar di subjects.csv tetapi belum punya foto"))
+    issues += _recognition_checks(paths, subjects, used)
 
     summary = dict(Counter(row.set for row in rows))
     summary["dianotasi"] = sum(1 for row in rows if row.file in annotations)

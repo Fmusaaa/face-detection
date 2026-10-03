@@ -5,11 +5,13 @@
     python -m pcdface demo --selftest              # uji tanpa kamera dan tanpa jendela
 
 Tombol: 1/2/3… pilih detektor, d = detektor berikutnya, e = ganti enhancement
-(none ↔ clahe), s = simpan tangkapan layar ke results/demo/, q/ESC = keluar.
+(none ↔ clahe), r = pengenalan identitas LBPH aktif/nonaktif (butuh `enroll`),
+s = simpan tangkapan layar ke results/demo/, q/ESC = keluar.
 
-RUANG LINGKUP — sebutkan saat presentasi: setiap frame dideteksi ulang dari nol.
-Tidak ada tracking dan tidak ada pengenalan identitas; nomor #1, #2 hanya
-urutan kiri → kanan di frame itu, bukan identitas.
+RUANG LINGKUP — sebutkan saat presentasi: setiap frame dideteksi ulang dari nol,
+tanpa tracking. Nomor #1, #2 hanya urutan kiri → kanan di frame itu. Bila pengenalan
+aktif, wajah diberi kode peserta (S01, …) dari model LBPH yang hanya memuat peserta
+berizin; wajah lain berlabel "unknown" — sistem tidak pernah menampilkan nama.
 """
 
 from __future__ import annotations
@@ -23,10 +25,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from pcdface.config import Config, MediaPipeConfig
+from pcdface.config import Config, MediaPipeConfig, YoloConfig
 from pcdface.detection.base import DetectionResult, Detector
-from pcdface.detection.registry import build_detector
+from pcdface.detection.registry import build_detector, model_missing
 from pcdface.preprocessing import ENHANCEMENTS, enhance
+from pcdface.recognition.lbph import LBPHRecognizer, Prediction, model_exists
 from pcdface.tools.keys import lower_key
 
 
@@ -52,6 +55,8 @@ class DetectorCache:
 
     def device(self, name: str) -> str:
         spec = self.cfg.detector(name)
+        if isinstance(spec, YoloConfig):
+            return "CPU, OpenCV DNN"
         if not isinstance(spec, MediaPipeConfig):
             return "CPU"
         from pcdface.detection.mediapipe_detector import delegate_label, resolve_delegate
@@ -66,18 +71,18 @@ class DetectorCache:
 
 
 def available_detectors(cfg: Config, requested: list[str]) -> tuple[list[str], list[str]]:
-    """(dipakai, dilewati) — MediaPipe dilewati bila berkas modelnya belum ada."""
+    """(dipakai, dilewati) — MediaPipe/YOLO dilewati bila berkas modelnya belum ada."""
     usable, skipped = [], []
     for name in requested:
-        spec = cfg.detector(name)
-        if isinstance(spec, MediaPipeConfig) and not (cfg.paths.models / spec.model).exists():
+        if model_missing(name, cfg):
             skipped.append(name)
         else:
             usable.append(name)
     return usable, skipped
 
 
-def draw_detections(canvas: np.ndarray, result: DetectionResult) -> None:
+def draw_detections(canvas: np.ndarray, result: DetectionResult,
+                    identities: list[Prediction] | None = None) -> None:
     width = canvas.shape[1]
     order = sorted(range(len(result.boxes)), key=lambda i: result.boxes[i][0])
     keypoints = result.info.get("keypoints", [])
@@ -87,6 +92,8 @@ def draw_detections(canvas: np.ndarray, result: DetectionResult) -> None:
         label = f"#{number} {w}x{h}px {100 * w / width:.1f}%"
         if result.scores is not None:
             label += f" s={result.scores[index]:.2f}"
+        if identities is not None and index < len(identities):
+            label = f"{identities[index].label} ({identities[index].distance:.0f}) " + label
         (tw, th), base = cv2.getTextSize(label, FONT, 0.5, 1)
         top = max(y - th - base - 4, 0)
         cv2.rectangle(canvas, (x, top), (x + tw + 6, top + th + base + 4), BOX, -1)
@@ -97,32 +104,54 @@ def draw_detections(canvas: np.ndarray, result: DetectionResult) -> None:
 
 
 def draw_hud(canvas: np.ndarray, name: str, device: str, enhancement: str, faces: int,
-             detect_ms: float, fps: float) -> None:
+             detect_ms: float, fps: float, recognizing: bool = False) -> None:
     lines = [f"Detektor : {name} ({device})", f"Enhance  : {enhancement}", f"Wajah    : {faces}",
-             f"Deteksi  : {detect_ms:.1f} ms | {fps:.1f} FPS"]
+             f"Deteksi  : {detect_ms:.1f} ms | {fps:.1f} FPS", f"Kenali   : {'LBPH aktif' if recognizing else 'mati'}"]
     overlay = canvas.copy()
     cv2.rectangle(overlay, (0, 0), (330, 16 + 22 * len(lines)), HUD_BG, -1)
     cv2.addWeighted(overlay, 0.7, canvas, 0.3, 0, canvas)
     for i, line in enumerate(lines):
         cv2.putText(canvas, line, (10, 28 + 22 * i), FONT, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
     height = canvas.shape[0]
-    cv2.putText(canvas, "1/2/3 atau d = detektor  e = enhancement  s = simpan  q = keluar",
+    cv2.putText(canvas, "1/2/3 atau d = detektor  e = enhancement  r = kenali  s = simpan  q = keluar",
                 (10, height - 34), FONT, 0.5, (0, 220, 255), 1, cv2.LINE_AA)
-    cv2.putText(canvas, "deteksi per frame - tanpa tracking, tanpa pengenalan identitas",
-                (10, height - 12), FONT, 0.5, (0, 220, 255), 1, cv2.LINE_AA)
+    scope = ("kode peserta berizin dari LBPH, lainnya 'unknown' - tanpa nama" if recognizing
+             else "deteksi per frame - tanpa tracking, tanpa pengenalan identitas")
+    cv2.putText(canvas, scope, (10, height - 12), FONT, 0.5, (0, 220, 255), 1, cv2.LINE_AA)
+
+
+def recognize(frame: np.ndarray, boxes: list, recognizer: LBPHRecognizer, mirrored: bool) -> list[Prediction]:
+    """LBPH pada frame asli tanpa enhancement, seperti galeri dilatih.
+
+    Bila tampilan dicerminkan, kotak dipetakan balik ke frame asli: pola LBP wajah cermin
+    berbeda dari wajah aslinya, jadi LBPH pada wajah cermin diam-diam memburuk.
+    """
+    source = cv2.flip(frame, 1) if mirrored else frame
+    width = frame.shape[1]
+    return [recognizer.predict_box(source, (width - x - w, y, w, h) if mirrored else (x, y, w, h))
+            for x, y, w, h in boxes]
 
 
 def process_frame(frame: np.ndarray, detector: Detector, enhancement: str, cfg: Config,
-                  timestamp_ms: int | None = None) -> tuple[np.ndarray, DetectionResult]:
+                  timestamp_ms: int | None = None, recognizer: LBPHRecognizer | None = None,
+                  mirrored: bool = False) -> tuple[np.ndarray, DetectionResult]:
     pre = cfg.preprocessing
     image = enhance(frame, enhancement, pre.clahe_clip_limit, pre.clahe_tile_grid)
     if timestamp_ms is not None and hasattr(detector, "running_mode") and detector.running_mode == "video":
         result = detector.detect(image, timestamp_ms=timestamp_ms)
     else:
         result = detector.detect(image)
+    identities = recognize(frame, result.boxes, recognizer, mirrored) if recognizer is not None else None
     canvas = image.copy()
-    draw_detections(canvas, result)
+    draw_detections(canvas, result, identities)
     return canvas, result
+
+
+def load_recognizer(cfg: Config) -> LBPHRecognizer | None:
+    """Model LBPH bila sudah dilatih (`enroll`), selain itu None."""
+    if not model_exists(cfg.paths.recognition):
+        return None
+    return LBPHRecognizer.load(cfg.paths.recognition, cfg.recognition)
 
 
 def run_selftest(cfg: Config, names: list[str]) -> int:
@@ -152,10 +181,36 @@ def run_selftest(cfg: Config, names: list[str]) -> int:
             ok = shapes == {(height, width, 3)}
             failures += not ok
             print(f"  {name:<9} {'OK' if ok else 'GAGAL'}  (8 frame, ganti enhancement tiap frame)")
+        if usable:
+            failures += not _selftest_recognition(cfg, cache.get(usable[0]), rng)
     finally:
         cache.close()
     print("Uji mandiri demo: " + ("LULUS" if failures == 0 and usable else "GAGAL"))
     return 0 if failures == 0 and usable else 1
+
+
+def _selftest_recognition(cfg: Config, detector: Detector, rng: np.random.Generator) -> bool:
+    """LBPH sementara (di memori, tidak disimpan) dari dua wajah sintetis; uji jalur kenali + cermin."""
+    from pcdface.recognition.lbph import train_from
+    from pcdface.synthetic import FaceSpec, render_scene
+
+    width, height = cfg.capture.width, cfg.capture.height
+    items = []
+    for trait, label in ((0, "S01"), (1, "S02")):
+        frame, boxes = render_scene(width, height, [FaceSpec(width // 2, int(height * 0.45), 220, (150, 175, 220),
+                                                             trait=trait)], "normal", rng)
+        items.append((frame, boxes[0], label))
+    recognizer = train_from(items, cfg.recognition)
+    frame, box = items[1][0], items[1][1]
+    direct = recognize(frame, [box], recognizer, mirrored=False)[0]
+    flipped = cv2.flip(frame, 1)
+    mirrored_box = (width - box[0] - box[2], box[1], box[2], box[3])
+    via_mirror = recognize(flipped, [mirrored_box], recognizer, mirrored=True)[0]
+    canvas, _ = process_frame(flipped, detector, "none", cfg, recognizer=recognizer, mirrored=True)
+    ok = (direct.nearest == "S02" and via_mirror.nearest == "S02"
+          and abs(direct.distance - via_mirror.distance) < 1e-6 and canvas.shape == (height, width, 3))
+    print(f"  {'kenali':<9} {'OK' if ok else 'GAGAL'}  (LBPH sementara, frame cermin dipetakan balik)")
+    return ok
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -196,8 +251,10 @@ def run(args: argparse.Namespace, cfg: Config) -> int:
         return 1
 
     cache = DetectorCache(cfg, names)
+    recognizer: LBPHRecognizer | None = None
+    recognizing = False
     print("Detektor: " + ", ".join(f"{i}={n}" for i, n in enumerate(names, start=1)))
-    print("Catatan: deteksi per frame, tanpa tracking dan tanpa pengenalan identitas.")
+    print("Catatan: deteksi per frame, tanpa tracking. Tombol r = pengenalan LBPH (kode peserta berizin).")
     fps, last, start = 0.0, time.perf_counter(), time.monotonic()
     try:
         while True:
@@ -209,11 +266,14 @@ def run(args: argparse.Namespace, cfg: Config) -> int:
                 frame = cv2.flip(frame, 1)
             detector = cache.get(current)
             canvas, result = process_frame(frame, detector, enhancement, cfg,
-                                           timestamp_ms=int((time.monotonic() - start) * 1000))
+                                           timestamp_ms=int((time.monotonic() - start) * 1000),
+                                           recognizer=recognizer if recognizing else None,
+                                           mirrored=not args.no_mirror)
             now = time.perf_counter()
             fps = 0.9 * fps + 0.1 * (1.0 / max(now - last, 1e-6)) if fps else 1.0 / max(now - last, 1e-6)
             last = now
-            draw_hud(canvas, current, cache.device(current), enhancement, len(result.boxes), result.elapsed_ms, fps)
+            draw_hud(canvas, current, cache.device(current), enhancement, len(result.boxes), result.elapsed_ms, fps,
+                     recognizing)
             cv2.imshow(WINDOW, canvas)
 
             key = lower_key(cv2.waitKey(1))
@@ -226,6 +286,14 @@ def run(args: argparse.Namespace, cfg: Config) -> int:
                 current = names[(names.index(current) + 1) % len(names)]
             elif key == ord("e"):
                 enhancement = ENHANCEMENTS[(ENHANCEMENTS.index(enhancement) + 1) % len(ENHANCEMENTS)]
+            elif key == ord("r"):
+                if recognizer is None:
+                    recognizer = load_recognizer(cfg)
+                if recognizer is None:
+                    print("  model pengenalan belum ada — jalankan dulu: python -m pcdface enroll")
+                else:
+                    recognizing = not recognizing
+                    print(f"  pengenalan {'aktif' if recognizing else 'mati'} ({', '.join(recognizer.labels)})")
             elif key == ord("s"):
                 folder = cfg.paths.results / "demo"
                 folder.mkdir(parents=True, exist_ok=True)

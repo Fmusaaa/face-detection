@@ -18,14 +18,15 @@ EXPECTED_TABLES = {
     "e6": ["e6_ringkasan", "e6_pose", "e6_per_sumbu", "e6_batas_sudut", "e6_pose_vs_depan", "e6_ekspresi",
            "e6_ekspresi_vs_netral", "e6_oklusi", "e6_oklusi_vs_tanpa", "e6_perbandingan"],
     "e7": ["e7_ringkasan", "e7_recall_per_jarak", "e7_vs_asli", "e7_perbandingan"],
+    "e8": ["e8_ringkasan", "e8_per_kondisi", "e8_vs_acuan", "e8_ambang", "e8_prediksi"],
 }
 
 
 @pytest.fixture(scope="module")
 def outputs(small_cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("results")
-    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5", "e6", "e7"], synthetic=True, results_root=root,
-                           plots=False)
+    return run_experiments(small_cfg, ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"], synthetic=True,
+                           results_root=root, plots=False)
 
 
 
@@ -75,7 +76,7 @@ def test_e2_counts_and_positions(outputs, small_cfg):
 
 def test_e3_variants_cover_equalize(outputs, small_cfg):
     f1 = pd.read_csv(outputs["e3"] / "e3_f1.csv")
-    assert {"haar_eq", "haar_noeq", "mp_short", "mp_full"} == set(f1["varian"])
+    assert {"haar_eq", "haar_noeq", "mp_short", "mp_full", "yolo_n"} == set(f1["varian"])
     assert set(f1["cahaya"]) == set(small_cfg.dataset.lightings)
     assert set(f1["enhancement"]) == {"none", "clahe"}
 

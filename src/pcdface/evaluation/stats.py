@@ -55,7 +55,10 @@ def wilson(successes: int, trials: int, level: float = 0.95) -> Estimate:
     denom = 1.0 + z * z / trials
     center = (p + z * z / (2 * trials)) / denom
     half = z * math.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials)) / denom
-    return Estimate(p, max(0.0, center - half), min(1.0, center + half))
+    # pada 0/n dan n/n batasnya tepat 0 dan 1 secara analitik; tanpa ini galat pembulatan menyisakan ±1e-17
+    low = 0.0 if successes == 0 else max(0.0, center - half)
+    high = 1.0 if successes == trials else min(1.0, center + half)
+    return Estimate(p, low, high)
 
 
 def _resample_indices(n_groups: int, n_resamples: int, seed: int) -> np.ndarray:

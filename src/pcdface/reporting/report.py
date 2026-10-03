@@ -35,6 +35,7 @@ EXPERIMENT_TITLES = {
     "e5": "E5 — Sensitivitas parameter Haar",
     "e6": "E6 — Pose, ekspresi, dan oklusi",
     "e7": "E7 — Blur gerak (simulasi)",
+    "e8": "E8 — Pengenalan identitas LBPH",
 }
 
 
@@ -67,7 +68,7 @@ def build_summary(results_root: Path) -> Path | None:
             lines += [f"![{figure.stem}]({name}/{figure.name})", ""]
         for stem in snapshot.get("tabel", []):
             md = out_dir / f"{stem}.md"
-            if md.exists() and not stem.endswith("_kurva_pr"):
+            if md.exists() and not stem.endswith(("_kurva_pr", "_ambang", "_prediksi")):
                 lines += [md.read_text(encoding="utf-8").strip(), ""]
         sections.append("\n".join(lines))
     if not sections:

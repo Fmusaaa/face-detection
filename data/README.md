@@ -14,7 +14,8 @@ menurut UU No. 27 Tahun 2022 Pasal 4 ayat (2). Rincian protokol ada di
 3. Foto diambil lewat tool `capture` (Fase 2), bukan disalin manual, supaya
    nama berkas dan `metadata.csv` selalu konsisten.
 4. Peserta yang menarik diri dihapus dengan `python -m pcdface forget S03` —
-   termasuk foto multi-wajah yang memuat dirinya.
+   termasuk foto multi-wajah yang memuat dirinya dan model pengenalan
+   `recognition/` bila memuat dirinya (latih ulang dengan `enroll`).
 5. Data dihapus setelah nilai UTS keluar, atau setelah jurnal terbit bila
    peserta menyetujui publikasi.
 
@@ -27,6 +28,7 @@ data/
 ├── metadata.csv            diisi otomatis oleh `capture`, satu baris per foto
 ├── annotations/boxes.json  kotak wajah manual (ground truth), dari `annotate`
 ├── crops/                  potongan kotak wajah, dari `crop`
+├── recognition/            model LBPH (lbph.yml + labels.json), dari `enroll` — templat biometrik
 └── raw/
     ├── jarak/S01/jarak_S01_150cm_normal_04.jpg
     ├── cahaya/S01/cahaya_S01_100cm_redup_02.jpg
@@ -50,14 +52,18 @@ Satu baris per peserta, diisi dari formulir yang **sudah ditandatangani**:
 | `consent_research` | `ya` | Bagian 5 formulir. Tanpa `ya`, peserta tidak boleh difoto |
 | `consent_publication` | `ya` / `tidak` | Bagian 6 formulir. `tidak` → wajahnya diburamkan di setiap contoh gambar |
 | `consent_date` | `2026-09-30` | Tanggal tanda tangan, format ISO |
+| `consent_recognition` | `ya` / `tidak` | Bagian 7 formulir (v4). Tanpa `ya`, wajah peserta tidak pernah dipakai `enroll` maupun E8. Kolom boleh tidak ada di berkas lama — dianggap `tidak` |
 
 Contoh:
 
 ```
-subject_id,consent_research,consent_publication,consent_date
-S01,ya,tidak,2026-09-30
-S02,ya,ya,2026-09-30
+subject_id,consent_research,consent_publication,consent_date,consent_recognition
+S01,ya,tidak,2026-09-30,ya
+S02,ya,ya,2026-09-30,tidak
 ```
+
+Peserta yang menandatangani formulir sebelum versi 4 belum mengisi bagian 7 — isi
+`consent_recognition` hanya setelah bagian 7 ditandatangani.
 
 ## `metadata.csv` — diisi otomatis
 

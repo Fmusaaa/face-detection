@@ -16,6 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "configs" / "experiment.yaml"
 
 _REQUIRED_KEYS = ("raw", "metadata", "subjects", "annotations", "crops", "models", "results")
+# Kunci opsional dan nilai bawaannya (relatif terhadap root) — config lama tetap terbaca
+_OPTIONAL_KEYS = {"recognition": "data/recognition"}
 
 
 def resolve(path: str | Path, root: Path = PROJECT_ROOT) -> Path:
@@ -35,13 +37,17 @@ class ProjectPaths:
     crops: Path
     models: Path
     results: Path
+    # model LBPH terlatih + daftar label. Berisi templat biometrik — data pribadi, di-gitignore (PRD §11)
+    recognition: Path = PROJECT_ROOT / "data" / "recognition"
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, str], root: Path = PROJECT_ROOT) -> "ProjectPaths":
         missing = [key for key in _REQUIRED_KEYS if key not in mapping]
         if missing:
             raise KeyError(f"paths tidak lengkap, kurang: {', '.join(missing)}")
-        return cls(**{key: resolve(mapping[key], root) for key in _REQUIRED_KEYS})
+        values = {key: resolve(mapping[key], root) for key in _REQUIRED_KEYS}
+        values.update({key: resolve(mapping.get(key, default), root) for key, default in _OPTIONAL_KEYS.items()})
+        return cls(**values)
 
     def with_data_root(self, data_root: Path) -> "ProjectPaths":
         """Salinan dengan data di `data_root` (untuk dataset sintetis).
@@ -57,4 +63,5 @@ class ProjectPaths:
             crops=data_root / "crops",
             models=self.models,
             results=self.results / "synthetic",
+            recognition=data_root / "recognition",
         )

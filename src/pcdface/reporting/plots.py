@@ -1,4 +1,4 @@
-"""Grafik PRD §10 (8 grafik minimum + grafik 9–12 untuk E6 dan E7) — PNG 300 dpi + PDF, dibangun dari CSV hasil.
+"""Grafik PRD §10 (8 grafik minimum + grafik 9–12 untuk E6 dan E7, 13–15 untuk E8) — PNG 300 dpi + PDF, dibangun dari CSV hasil.
 
 Semua grafik hanya membaca tabel `.csv` di folder eksperimen, sehingga
 `python -m pcdface report` bisa membangunnya ulang tanpa menjalankan detektor.
@@ -40,6 +40,9 @@ DETECTOR_STYLE: dict[str, tuple[str, str]] = {
     "mp_full": ("#1baf7a", "^"),
     "mp_sparse": ("#4a3aa7", "v"),
     "ycbcr": ("#e87ba4", "P"),
+    "yolo_n": ("#eda100", "X"),       # slot 4: urutan haar–mp_short–mp_full–yolo_n lolos validator
+    "yolo_m": ("#008300", "h"),
+    "manual": ("#52514e", "D"),       # E8: kotak manual = pembanding netral, bukan detektor
 }
 FALLBACK = ("#52514e", "x")
 SEQUENTIAL = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
@@ -47,6 +50,7 @@ LABEL = {
     "haar": "Haar", "haar_eq": "Haar (equalize)", "haar_noeq": "Haar (tanpa equalize)",
     "mp_short": "MediaPipe short", "mp_full": "MediaPipe full", "mp_sparse": "MediaPipe sparse",
     "ycbcr": "YCbCr",
+    "yolo_n": "YOLOv8n-face", "yolo_m": "YOLOv8m-face", "manual": "kotak manual",
 }
 DPI = 300
 
@@ -341,8 +345,9 @@ def plot_speed(out_dir: Path) -> list[Path]:
     ax.set_xticks(x, [r.replace("x", "×") for r in resolutions])
     ax.set_ylabel("Waktu per frame (ms)")
     ax.yaxis.set_major_formatter(_comma(0))
-    ax.set_title("Waktu deteksi: median, galat hingga persentil ke-95", loc="left")
-    ax.legend(loc="upper right")
+    ax.set_title("Waktu deteksi: median, galat hingga persentil ke-95", loc="left", pad=8 + 14 * ((len(detectors) + 1) // 2))
+    # legenda di atas area plot: dengan ≥ 4 detektor, legenda di dalam plot menutupi batang
+    ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncols=2)
     ax.grid(axis="x", visible=False)
     return _save(fig, out_dir, "grafik8_kecepatan")
 
@@ -483,6 +488,120 @@ def plot_blur(out_dir: Path) -> list[Path]:
     return _save(fig, out_dir, "grafik12_recall_blur")
 
 
+# ---------------------------------------------------------------------------
+# E8
+# ---------------------------------------------------------------------------
+def _source_label(name: str) -> str:
+    return "kotak manual (LBPH saja)" if name == "manual" else f"{_label(name)} + LBPH"
+
+
+def _accuracy_axis(ax: plt.Axes) -> None:
+    ax.set_ylim(-0.03, 1.03)
+    ax.yaxis.set_major_formatter(_comma(1))
+    ax.set_ylabel("Akurasi rank-1")
+
+
+def plot_recognition_distance(out_dir: Path) -> list[Path]:
+    """Grafik 13: akurasi pengenalan terhadap jarak, per sumber kotak; titik 100 cm = foto uji acuan."""
+    df = _read(out_dir, "e8_per_kondisi")
+    if df is None:
+        return []
+    fig, ax = plt.subplots(figsize=(6.4, 3.9))
+    plotted = False
+    for source, part in df.groupby("sumber", sort=False):
+        distance = part[part["faktor"] == "jarak"]
+        if distance.empty:
+            continue
+        # baris acuan membawa jarak acuan (foto uji depan/netral/tanpa) — mengisi titik jarak galeri
+        both = pd.concat([distance, part[part["faktor"] == "acuan"]]).sort_values("jarak_cm")
+        color, marker = _style(source)
+        ax.fill_between(both["jarak_cm"], both["akurasi_low"], both["akurasi_high"], color=color, alpha=0.14,
+                        linewidth=0)
+        ax.plot(both["jarak_cm"], both["akurasi"], color=color, marker=marker, label=_source_label(source))
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return []
+    ax.set_xlabel("Jarak kamera–wajah (cm)")
+    _accuracy_axis(ax)
+    ax.set_xticks(sorted(set(df.loc[df["faktor"].isin(["jarak", "acuan"]), "jarak_cm"].dropna())))
+    ax.set_title("Akurasi pengenalan LBPH terhadap jarak, pita = Wilson 95%", loc="left")
+    fig.text(0.01, -0.03, "Galeri: set jarak di jarak acuan. Titik di jarak acuan = foto uji depan/netral/tanpa "
+             "yang direkam di momen lain.", color=INK_2, fontsize=8, ha="left")
+    ax.legend(loc="lower left")
+    return _save(fig, out_dir, "grafik13_pengenalan_jarak")
+
+
+def plot_recognition_conditions(out_dir: Path) -> list[Path]:
+    """Grafik 14: akurasi pengenalan per cahaya, pose (jarak acuan), ekspresi, dan oklusi."""
+    df = _read(out_dir, "e8_per_kondisi")
+    if df is None:
+        return []
+    reference = df[df["faktor"] == "acuan"]
+    panels = []
+    for factor, title in (("cahaya", "Cahaya"), ("pose", "Pose (jarak terdekat)"), ("ekspresi", "Ekspresi"),
+                          ("oklusi", "Penutup wajah")):
+        part = df[df["faktor"] == factor]
+        if factor == "pose" and not part.empty:
+            part = part[part["jarak_cm"] == part["jarak_cm"].min()]
+        if factor == "cahaya" and not part.empty and not reference.empty:
+            part = pd.concat([reference.assign(level="normal (acuan)"), part])
+        if not part.empty:
+            panels.append((title, part))
+    if not panels:
+        return []
+    widths = [max(len(part["level"].unique()), 2) for _, part in panels]
+    fig, axes = plt.subplots(1, len(panels), figsize=(0.62 * sum(widths) + 2.0, 3.9), sharey=True,
+                             gridspec_kw={"width_ratios": widths}, squeeze=False)
+    sources = list(dict.fromkeys(df["sumber"]))
+    width = 0.5 / max(len(sources), 1)
+    for ax, (title, part) in zip(axes[0], panels):
+        levels = list(dict.fromkeys(part["level"]))
+        x = np.arange(len(levels), dtype=float)
+        for i, source in enumerate(sources):
+            rows = part[part["sumber"] == source].drop_duplicates("level").set_index("level").reindex(levels)
+            color, marker = _style(source)
+            value = rows["akurasi"].to_numpy(dtype=float)
+            err = np.vstack([value - rows["akurasi_low"].to_numpy(dtype=float),
+                             rows["akurasi_high"].to_numpy(dtype=float) - value])
+            ax.errorbar(x + (i - (len(sources) - 1) / 2) * width, value, yerr=err, fmt=marker, color=color,
+                        ecolor=color, elinewidth=1.0, capsize=2.5, markersize=6,
+                        label=_source_label(source) if ax is axes[0][0] else None)
+        ax.set_xticks(x, [str(v).replace("_", " ") for v in levels], rotation=45, ha="right", fontsize=8)
+        ax.set_title(title, loc="left", fontsize=10)
+        ax.grid(axis="x", visible=False)
+    _accuracy_axis(axes[0][0])
+    fig.legend(loc="lower left", bbox_to_anchor=(0.01, 0.98), ncols=len(sources))
+    fig.suptitle("Akurasi pengenalan LBPH per kondisi, galat = Wilson 95%", x=0.01, y=1.1, ha="left",
+                 color=INK, fontsize=11.5)
+    return _save(fig, out_dir, "grafik14_pengenalan_kondisi")
+
+
+def plot_recognition_threshold(out_dir: Path) -> list[Path]:
+    """Grafik 15: kurva DIR terhadap FAR (open-set) per sumber kotak; titik = ambang config."""
+    curve, summary = _read(out_dir, "e8_ambang"), _read(out_dir, "e8_ringkasan")
+    if curve is None:
+        return []
+    fig, ax = plt.subplots(figsize=(5.4, 4.2))
+    for source, part in curve.groupby("sumber", sort=False):
+        color, marker = _style(source)
+        part = part.sort_values("ambang")
+        ax.plot(part["far"], part["dir"], color=color, label=_source_label(source))
+        if summary is not None and source in set(summary["sumber"]):
+            point = summary[summary["sumber"] == source].iloc[0]
+            ax.plot(point["far"], point["dir"], marker=marker, color=color, markersize=10,
+                    markeredgecolor=SURFACE, markeredgewidth=1.2, zorder=5)
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_ylim(-0.02, 1.02)
+    ax.xaxis.set_major_formatter(_comma(1))
+    ax.yaxis.set_major_formatter(_comma(1))
+    ax.set_xlabel("FAR — peserta tak dikenal diterima")
+    ax.set_ylabel("DIR — dikenali benar dan diterima")
+    ax.set_title("Kurva DIR–FAR LBPH (titik = ambang config)", loc="left")
+    ax.legend(loc="lower right")
+    return _save(fig, out_dir, "grafik15_pengenalan_ambang")
+
+
 PLOTTERS = {
     "e1": [plot_recall_vs_distance, plot_width_loglog, plot_recall_vs_size, plot_resolution_effect,
            lambda d: plot_pr_curves(d, "e1")],
@@ -492,6 +611,7 @@ PLOTTERS = {
     "e5": [],
     "e6": [plot_pose, plot_expression, plot_occlusion],
     "e7": [plot_blur],
+    "e8": [plot_recognition_distance, plot_recognition_conditions, plot_recognition_threshold],
 }
 
 

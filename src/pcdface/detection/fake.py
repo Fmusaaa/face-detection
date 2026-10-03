@@ -5,7 +5,8 @@ memutuskan terdeteksi atau tidak dengan peluang yang bergantung ukuran wajah —
 meniru perbedaan mekanisme di PRD §2.1:
 
 - profil Haar/YCbCr: batas **absolut dalam piksel** (resolusi kecil merugikan);
-- profil MediaPipe: batas **relatif terhadap lebar frame** (resolusi tidak berpengaruh).
+- profil MediaPipe dan YOLO: batas **relatif terhadap lebar frame** (resolusi tidak
+  berpengaruh); YOLO memperkecil frame ke 640 px, bukan 128 px, jadi batasnya lebih kecil.
 
 Keputusan acak diturunkan dari isi citra + nama detektor, jadi hasilnya sama
 setiap dijalankan. Angka dari detektor ini BUKAN hasil penelitian.
@@ -44,6 +45,8 @@ PROFILES: dict[str, FakeProfile] = {
     "mp_short": FakeProfile(True, 0.055, 0.006, 0.9, 0.02, 0.95, (0.0, 1.0), True),
     "mp_full": FakeProfile(True, 0.026, 0.004, 0.9, 0.02, 0.95, (0.0, 1.0), True),
     "mp_sparse": FakeProfile(True, 0.029, 0.004, 0.88, 0.02, 0.95, (0.0, 1.0), True),
+    "yolo_n": FakeProfile(True, 0.018, 0.003, 0.93, 0.02, 0.97, (0.0, 1.0), True),
+    "yolo_m": FakeProfile(True, 0.015, 0.003, 0.95, 0.01, 0.97, (0.0, 1.0), True),
 }
 
 
@@ -51,7 +54,8 @@ def profile_for(name: str, kind: str) -> FakeProfile:
     """Profil menurut nama detektor, lalu menurut jenisnya."""
     if name in PROFILES:
         return PROFILES[name]
-    return PROFILES["haar"] if kind == "haar" else PROFILES["ycbcr"] if kind == "ycbcr" else PROFILES["mp_short"]
+    by_kind = {"haar": "haar", "ycbcr": "ycbcr", "yolo": "yolo_n"}
+    return PROFILES[by_kind.get(kind, "mp_short")]
 
 
 def _components(image_bgr: np.ndarray) -> list[tuple[Box, float, float]]:

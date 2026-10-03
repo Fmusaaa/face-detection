@@ -59,13 +59,18 @@ def _tool(module: str) -> tuple[Callable[[argparse.ArgumentParser], None], Handl
 
 
 COMMANDS: list[tuple[str, str, Callable[[argparse.ArgumentParser], None], Handler]] = [
-    ("download-models", "Unduh model .tflite, tulis dan verifikasi SHA-256", _download_models_args, _download_models),
+    ("download-models", "Unduh model .tflite dan .onnx, tulis dan verifikasi SHA-256", _download_models_args,
+     _download_models),
+    ("export-yolo", "Ekspor bobot YOLO-face .pt ke ONNX di venv terpisah", *_tool("export_yolo")),
     ("capture", "Rekam foto dari webcam dan tulis metadata", *_tool("capture")),
     ("annotate", "Gambar kotak wajah manual (ground truth)", *_tool("annotate")),
     ("crop", "Ekspor isi kotak manual ke data/crops/", *_tool("crop")),
     ("validate", "Periksa konsistensi data, metadata, dan anotasi", *_tool("validate")),
     ("forget", "Hapus seluruh data satu subjek", *_tool("forget")),
-    ("run", "Jalankan eksperimen e1..e5 atau all", *_tool("pcdface.experiments.runner")),
+    ("enroll", "Latih pengenal identitas LBPH dari foto peserta yang mengizinkan", *_tool("enroll")),
+    ("crop-faces", "Deteksi lalu crop setiap wajah per foto, opsional dikelompokkan per identitas",
+     *_tool("crop_faces")),
+    ("run", "Jalankan eksperimen e1..e8 atau all", *_tool("pcdface.experiments.runner")),
     ("report", "Bangun ulang grafik dan RINGKASAN.md dari hasil tersimpan", *_tool("pcdface.reporting.report")),
     ("demo", "Demo deteksi realtime dari webcam", *_tool("demo_realtime")),
     ("selftest", "Uji metrik dan jalur sintetis tanpa webcam/model", _selftest_args, _selftest),
@@ -75,7 +80,8 @@ COMMANDS: list[tuple[str, str, Callable[[argparse.ArgumentParser], None], Handle
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m pcdface",
-        description="Deteksi wajah Haar Cascade vs MediaPipe BlazeFace — tanpa pengenalan identitas.",
+        description="Deteksi wajah Haar Cascade vs MediaPipe BlazeFace vs YOLO-face, crop wajah, "
+                    "dan pengenalan identitas LBPH (ID pseudonim, dengan izin peserta).",
     )
     parser.add_argument("--version", action="version", version=f"pcdface {__version__}")
     parser.add_argument("--config", default=None, help="Berkas config (bawaan: configs/experiment.yaml)")
