@@ -1,4 +1,4 @@
-"""Tes asap MediaPipe dengan berkas .tflite asli — `pytest -m models`.
+"""Tes asap MediaPipe (.tflite) dan YOLOv8n-face (.onnx) dengan berkas model asli — `pytest -m models`.
 
 Tanpa citra wajah asli, tes ini hanya memastikan detektor bisa dibuat,
 dijalankan (mode IMAGE dan VIDEO), dan ditutup. Bila variabel lingkungan
@@ -65,3 +65,36 @@ def test_real_face_detected_and_channel_order_matters(cfg):
     assert max(correct.scores) > max(swapped.scores or [0.0])
     with build_detector("haar", cfg) as haar:
         assert len(haar.detect(image).boxes) >= 1
+
+
+# ---------------------------------------------------------------------------
+# YOLOv8n-face (OpenCV DNN)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def yolo_model(cfg):
+    path = cfg.paths.models / cfg.detector("yolo_n").model
+    if not path.exists():
+        pytest.skip("yolov8n-face.onnx belum diunduh — jalankan python -m pcdface download-models")
+    return path
+
+
+@pytest.mark.parametrize("mode", ["operating", "ap"])
+def test_yolo_runs_on_blank_and_synthetic(cfg, synthetic_paths, yolo_model, mode):
+    blank = np.full((720, 1280, 3), 128, dtype=np.uint8)
+    synthetic = cv2.imread(str(next((synthetic_paths.raw / "multi").rglob("*.jpg"))))
+    with build_detector("yolo_n", cfg, mode=mode) as detector:
+        assert detector.layout == "raw"                      # head mentah derronqi/hpc203
+        expected = cfg.evaluation.ap_run.yolo_conf_threshold if mode == "ap" else cfg.detector("yolo_n").conf_threshold
+        assert detector.conf_threshold == expected
+        assert detector.detect(blank).boxes == []
+        result = detector.detect(synthetic)
+        assert len(result.scores) == len(result.boxes) and all(0.0 < s <= 1.0 for s in result.scores)
+
+
+@pytest.mark.skipif(not os.environ.get("PCDFACE_SMOKE_IMAGE"), reason="PCDFACE_SMOKE_IMAGE tidak diset")
+def test_yolo_finds_real_face_with_landmarks(cfg, yolo_model):
+    image = cv2.imread(str(Path(os.environ["PCDFACE_SMOKE_IMAGE"])))
+    with build_detector("yolo_n", cfg) as detector:
+        result = detector.detect(image)
+    assert len(result.boxes) >= 1 and max(result.scores) > 0.5
+    assert len(result.info["keypoints"]) == len(result.boxes) and len(result.info["keypoints"][0]) == 5

@@ -18,7 +18,7 @@ from pcdface.pose import REFERENCE_EXPRESSION, REFERENCE_OCCLUSION, REFERENCE_PO
 
 SETS = ("jarak", "cahaya", "multi", "kosong", "pose", "ekspresi", "oklusi")
 ENHANCEMENTS = ("none", "clahe")
-DETECTOR_TYPES = ("haar", "mediapipe", "ycbcr")
+DETECTOR_TYPES = ("haar", "mediapipe", "ycbcr", "yolo")
 DELEGATES = ("auto", "gpu", "cpu")
 
 
@@ -92,7 +92,17 @@ class YCbCrConfig:
     type: str = "ycbcr"
 
 
-DetectorConfig = HaarConfig | MediaPipeConfig | YCbCrConfig
+@dataclass(frozen=True)
+class YoloConfig:
+    model: str                      # berkas .onnx di folder model
+    input_size: int                 # sisi masukan letterbox (640 untuk YOLOv8-face)
+    conf_threshold: float           # ambang keyakinan titik operasi (bawaan ultralytics 0,25)
+    nms_iou: float                  # ambang IoU NMS (bawaan ultralytics 0,7)
+    max_detections: int = 300       # bawaan ultralytics max_det
+    type: str = "yolo"
+
+
+DetectorConfig = HaarConfig | MediaPipeConfig | YCbCrConfig | YoloConfig
 
 
 @dataclass(frozen=True)
@@ -100,6 +110,7 @@ class APRunConfig:
     mp_min_detection_confidence: float
     haar_min_neighbors: int
     haar_nms_iou: float
+    yolo_conf_threshold: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -164,6 +175,11 @@ class E7Config:
 
 
 @dataclass(frozen=True)
+class E8Config:
+    detector: str                   # detektor jalur ujung-ke-ujung (crop dari deteksi)
+
+
+@dataclass(frozen=True)
 class ExperimentsConfig:
     e1: E1Config
     e2: E2Config
@@ -172,6 +188,19 @@ class ExperimentsConfig:
     e5: E5Config
     e6: E6Config
     e7: E7Config
+    e8: E8Config
+
+
+@dataclass(frozen=True)
+class RecognitionConfig:
+    """Pengenalan identitas LBPH (PRD v4 §5.4)."""
+
+    face_size: tuple[int, int]      # (lebar, tinggi) crop abu-abu
+    max_distance: float             # jarak LBPH di atas ambang → "unknown"
+    radius: int
+    neighbors: int
+    grid_x: int
+    grid_y: int
 
 
 @dataclass(frozen=True)
@@ -201,6 +230,7 @@ class Config:
     experiments: ExperimentsConfig
     stats: StatsConfig
     synthetic: SyntheticConfig
+    recognition: RecognitionConfig
     raw: dict[str, Any]
     source: Path | None = None
 
@@ -333,6 +363,17 @@ def _parse_detector(r: _Reader, name: str, spec: Mapping[str, Any]) -> DetectorC
             values["delegate"] = r.get(spec, "delegate", where, _str, lambda v: v in DELEGATES, f"salah satu dari {DELEGATES}")
         return None if None in values.values() else MediaPipeConfig(**values)
 
+    if kind == "yolo":
+        values = dict(
+            model=r.get(spec, "model", where, _str, lambda v: v.endswith(".onnx"), "berakhiran .onnx"),
+            input_size=r.get(spec, "input_size", where, _int, lambda v: v >= 32 and v % 32 == 0, "kelipatan 32"),
+            conf_threshold=r.get(spec, "conf_threshold", where, _float, _is_open_prob, "0 < x ≤ 1"),
+            nms_iou=r.get(spec, "nms_iou", where, _float, _is_open_prob, "0 < x ≤ 1"),
+        )
+        if "max_detections" in spec:
+            values["max_detections"] = r.get(spec, "max_detections", where, _int, lambda v: v >= 1, ">= 1")
+        return None if None in values.values() else YoloConfig(**values)
+
     values = dict(
         cb_range=r.get(spec, "cb_range", where, _pair_int, lambda v: 0 <= v[0] < v[1] <= 255, "0 ≤ min < max ≤ 255"),
         cr_range=r.get(spec, "cr_range", where, _pair_int, lambda v: 0 <= v[0] < v[1] <= 255, "0 ≤ min < max ≤ 255"),
@@ -440,6 +481,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
         mp_min_detection_confidence=r.get(ap, "mp_min_detection_confidence", "evaluation.ap_run.", _float, _is_prob, "0–1"),
         haar_min_neighbors=r.get(ap, "haar_min_neighbors", "evaluation.ap_run.", _int, lambda v: v >= 0, ">= 0"),
         haar_nms_iou=r.get(ap, "haar_nms_iou", "evaluation.ap_run.", _float, _is_open_prob, "0 < x ≤ 1"),
+        yolo_conf_threshold=r.get(ap, "yolo_conf_threshold", "evaluation.ap_run.", _float, _is_open_prob, "0 < x ≤ 1"),
     )
     evaluation = EvaluationConfig(
         iou_primary=r.get(ev, "iou_primary", "evaluation.", _float, _is_open_prob, "0 < x ≤ 1"),
@@ -459,7 +501,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
     def section(key: str) -> dict[str, Any]:
         return r.section(ex, key, "experiments.")
 
-    e1, e2, e3, e4, e5, e6, e7 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5", "e6", "e7"))
+    e1, e2, e3, e4, e5, e6, e7, e8 = (section(k) for k in ("e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"))
     experiments = ExperimentsConfig(
         e1=E1Config(
             detectors=r.get(e1, "detectors", "experiments.e1.", names),
@@ -492,6 +534,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
                           "naik, unik, ≥ 0, memuat 0 sebagai acuan"),
             blur_angle_deg=r.get(e7, "blur_angle_deg", "experiments.e7.", _float),
         ),
+        e8=E8Config(detector=r.get(e8, "detector", "experiments.e8.", _str)),
     )
 
     for key, spec in (("e1", experiments.e1), ("e2", experiments.e2), ("e3", experiments.e3), ("e4", experiments.e4),
@@ -501,6 +544,8 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
         for name in spec.detectors or ():
             if name not in det_raw:
                 r.errors.append(f"experiments.{key}.detectors: '{name}' tidak ada di bagian detectors")
+    if experiments.e8.detector and experiments.e8.detector not in det_raw:
+        r.errors.append(f"experiments.e8.detector: '{experiments.e8.detector}' tidak ada di bagian detectors")
     if experiments.e3.detectors and "haar" in experiments.e3.detectors and not experiments.e3.haar_equalize:
         r.errors.append("experiments.e3.haar_equalize: tidak boleh kosong bila haar diuji")
     if capture.width and capture.height:
@@ -527,6 +572,16 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
         face_width_cm=r.get(sy, "face_width_cm", "synthetic.", _float, lambda v: v > 0, "> 0"),
     )
 
+    rc = r.section(raw, "recognition", "")
+    recognition = RecognitionConfig(
+        face_size=r.get(rc, "face_size", "recognition.", _pair_int, lambda v: min(v) >= 16, ">= 16"),
+        max_distance=r.get(rc, "max_distance", "recognition.", _float, lambda v: v > 0, "> 0"),
+        radius=r.get(rc, "radius", "recognition.", _int, lambda v: v >= 1, ">= 1"),
+        neighbors=r.get(rc, "neighbors", "recognition.", _int, lambda v: 1 <= v <= 32, "1–32"),
+        grid_x=r.get(rc, "grid_x", "recognition.", _int, lambda v: v >= 1, ">= 1"),
+        grid_y=r.get(rc, "grid_y", "recognition.", _int, lambda v: v >= 1, ">= 1"),
+    )
+
     if r.errors:
         where = f" ({source})" if source else ""
         raise ConfigError(f"config tidak valid{where}:\n  - " + "\n  - ".join(r.errors))
@@ -543,6 +598,7 @@ def parse_config(raw: Mapping[str, Any], root: Path = PROJECT_ROOT, source: Path
         experiments=experiments,
         stats=stats,
         synthetic=synthetic,
+        recognition=recognition,
         raw=copy.deepcopy(dict(raw)),
         source=source,
     )

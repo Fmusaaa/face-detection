@@ -5,7 +5,9 @@
 - semua foto multi-wajah yang memuat S03 (dari kolom `subjects`),
 - crop dari foto-foto itu,
 - baris metadata dan anotasinya,
-- baris S03 di subjects.csv.
+- baris S03 di subjects.csv,
+- model pengenalan LBPH di `data/recognition/` bila memuat S03 — histogram LBP-nya
+  adalah templat biometrik S03 (PRD v4 §11). Latih ulang dengan `enroll`.
 
 Tanpa `--yes`, rencana penghapusan ditampilkan dulu dan harus dikonfirmasi
 dengan mengetik ulang kode peserta. Hasil eksperimen di `results/` tidak
@@ -31,6 +33,7 @@ from pcdface.dataset.metadata import (
     write_subjects,
 )
 from pcdface.paths import ProjectPaths
+from pcdface.recognition.lbph import LABELS_FILE, MODEL_FILE, model_subjects
 
 
 @dataclass
@@ -40,10 +43,12 @@ class ForgetPlan:
     crops: list[Path] = field(default_factory=list)
     annotation_keys: list[str] = field(default_factory=list)
     in_subjects_csv: bool = False
+    recognition_files: list[Path] = field(default_factory=list)   # model LBPH yang memuat templat peserta
 
     @property
     def empty(self) -> bool:
-        return not (self.photos or self.crops or self.annotation_keys or self.in_subjects_csv)
+        return not (self.photos or self.crops or self.annotation_keys or self.in_subjects_csv
+                    or self.recognition_files)
 
 
 def crop_paths_for(crops_dir: Path, relative_photo: str) -> list[Path]:
@@ -74,6 +79,12 @@ def plan_forget(paths: ProjectPaths, subject_id: str) -> ForgetPlan:
     plan.annotation_keys = [key for key in plan.photos if key in annotations]
     plan.crops = [crop for photo in plan.photos for crop in crop_paths_for(paths.crops, photo)]
     plan.in_subjects_csv = subject_id in read_subjects(paths.subjects)
+    model_files = [paths.recognition / name for name in (MODEL_FILE, LABELS_FILE)]
+    if (paths.recognition / MODEL_FILE).exists():
+        labels_known = (paths.recognition / LABELS_FILE).exists()
+        # tanpa daftar label tidak bisa dipastikan → hapus juga (lebih aman)
+        if not labels_known or subject_id in model_subjects(paths.recognition):
+            plan.recognition_files = [path for path in model_files if path.exists()]
     return plan
 
 
@@ -101,6 +112,8 @@ def execute_forget(paths: ProjectPaths, plan: ForgetPlan) -> None:
     if plan.subject_id in subjects:
         write_subjects(paths.subjects, [s for sid, s in subjects.items() if sid != plan.subject_id])
 
+    for path in plan.recognition_files:
+        path.unlink(missing_ok=True)
     for crop in plan.crops:
         crop.unlink(missing_ok=True)
         _remove_empty_dirs(crop.parent, paths.crops)
@@ -118,6 +131,7 @@ def describe(plan: ForgetPlan) -> str:
         f"  crop                : {len(plan.crops)}",
         f"  anotasi             : {len(plan.annotation_keys)}",
         f"  baris subjects.csv  : {'ya' if plan.in_subjects_csv else 'tidak ada'}",
+        f"  model pengenalan    : {'ya — dihapus, latih ulang dengan enroll' if plan.recognition_files else 'tidak memuat peserta ini'}",
     ]
     if multi:
         lines.append("  Foto multi-wajah ikut dihapus karena memuat wajah peserta ini (PRD §11).")

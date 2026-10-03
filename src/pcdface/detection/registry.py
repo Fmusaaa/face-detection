@@ -3,7 +3,8 @@
 Mode:
 - "operating": parameter bawaan config — untuk P/R/F1, IoU, FPPI (PRD §8.1)
 - "ap": ambang skor rendah dari `evaluation.ap_run` — untuk kurva PR dan AP
-  (PRD §8.2). Detektor tanpa skor (YCbCr) tidak punya mode ini.
+  (PRD §8.2). Detektor tanpa skor (YCbCr) tidak punya mode ini. MediaPipe dan
+  YOLO hanya menurunkan ambang keyakinan; ambang NMS-nya tetap.
 
 `synthetic=True` mengganti semua detektor dengan FakeDetector (tanpa model).
 """
@@ -11,9 +12,10 @@ Mode:
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
-from pcdface.config import Config, ConfigError, HaarConfig, MediaPipeConfig, YCbCrConfig
+from pcdface.config import Config, ConfigError, HaarConfig, MediaPipeConfig, YCbCrConfig, YoloConfig
 from pcdface.detection.base import Detector
 
 MODES = ("operating", "ap")
@@ -22,6 +24,20 @@ MODES = ("operating", "ap")
 def supports_scores(name: str, cfg: Config) -> bool:
     """True bila detektor punya skor sehingga bisa dihitung AP-nya."""
     return not isinstance(cfg.detector(name), YCbCrConfig)
+
+
+def model_file(name: str, cfg: Config) -> Path | None:
+    """Berkas model detektor (MediaPipe .tflite, YOLO .onnx), atau None untuk detektor klasik."""
+    spec = cfg.detector(name)
+    if isinstance(spec, (MediaPipeConfig, YoloConfig)):
+        return cfg.paths.models / spec.model
+    return None
+
+
+def model_missing(name: str, cfg: Config) -> bool:
+    """True bila detektor butuh berkas model yang belum diunduh/diekspor."""
+    path = model_file(name, cfg)
+    return path is not None and not path.exists()
 
 
 def build_detector(
@@ -72,6 +88,17 @@ def build_detector(
             delegate=spec.delegate,
         )
 
+    if isinstance(spec, YoloConfig):
+        from pcdface.detection.yolo import YoloDetector
+
+        return YoloDetector(
+            cfg.paths.models / spec.model,
+            name=name,
+            input_size=spec.input_size,
+            conf_threshold=ap.yolo_conf_threshold if mode == "ap" else spec.conf_threshold,
+            nms_iou=spec.nms_iou,
+            max_detections=spec.max_detections,
+        )
 
     from pcdface.detection.ycbcr import YCbCrDetector
 

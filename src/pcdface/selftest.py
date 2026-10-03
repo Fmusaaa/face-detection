@@ -7,6 +7,7 @@ penelitian — hanya bukti bahwa kode berjalan dan metrik terhitung benar.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import tempfile
 import traceback
@@ -124,7 +125,8 @@ def check_detectors(cfg: Config, workdir: Path) -> str:
     samples = load_samples(paths, sets=("multi",)).samples[:3]
     assert samples, "dataset sintetis belum dibuat"
     parts = []
-    for name, synthetic in (("haar", False), ("ycbcr", False), ("haar", True), ("mp_short", True), ("mp_full", True)):
+    for name, synthetic in (("haar", False), ("ycbcr", False), ("haar", True), ("mp_short", True), ("mp_full", True),
+                            ("yolo_n", True)):
         modes = ("operating", "ap") if supports_scores(name, cfg) else ("operating",)
         for mode in modes:
             with build_detector(name, cfg, mode=mode, synthetic=synthetic) as detector:
@@ -136,12 +138,84 @@ def check_detectors(cfg: Config, workdir: Path) -> str:
     return "kontrak DetectionResult OK untuk " + ", ".join(parts)
 
 
+def yolo_raw_outputs(cell: tuple[int, int, int], bins: int, score_logit: float = 4.0,
+                     input_size: int = 640) -> list[np.ndarray]:
+    """Tiga tensor head mentah YOLOv8-face buatan: satu sel (stride, gx, gy) berisi wajah dengan jarak
+    ke keempat tepi = `bins` × stride (DFL hampir satu-panas), sel lain berskor ≈ 0."""
+    outputs = []
+    for stride in (32, 8, 16):                              # urutan acak seperti keluaran OpenCV
+        grid = input_size // stride
+        out = np.zeros((1, 80, grid, grid), dtype=np.float32)
+        out[0, 64] = -20.0                                  # logit skor sangat rendah
+        if stride == cell[0]:
+            gx, gy = cell[1], cell[2]
+            out[0, :64, gy, gx] = -10.0
+            for side in range(4):
+                out[0, side * 16 + bins, gy, gx] = 10.0     # softmax ≈ satu-panas di bin `bins`
+            out[0, 64, gy, gx] = score_logit
+        outputs.append(out)
+    return outputs
+
+
+def check_yolo_decode(_: Config, __: Path) -> str:
+    from pcdface.detection.yolo import (decode_raw, decode_ultralytics, detect_layout, letterbox,
+                                        postprocess)
+
+    # 1280×720 → letterbox 640: skala 0,5, pita atas 140 px
+    padded, lb = letterbox(np.zeros((720, 1280, 3), np.uint8), 640)
+    assert padded.shape == (640, 640, 3) and (lb.scale, lb.pad_x, lb.pad_y) == (0.5, 0, 140), lb
+    # sel stride 16 (gx 10, gy 15): pusat (168, 248), jarak tepi 2 bin × 16 = 32 px
+    raw = yolo_raw_outputs((16, 10, 15), bins=2)
+    assert detect_layout(raw) == "raw"
+    boxes, scores, _ = decode_raw(raw, 640)
+    found, found_scores, _ = postprocess(boxes, scores, None, lb, (1280, 720), 0.25, 0.7, 300)
+    assert found == [(272, 152, 128, 128)], found
+    assert abs(found_scores[0] - 1 / (1 + np.exp(-4.0))) < 1e-6
+    # tata letak ultralytics: kotak yang sama + duplikat bergeser 2 px yang harus dibuang NMS
+    pred = np.zeros((1, 5, 8400), dtype=np.float32)
+    pred[0, :, 0] = [168, 248, 64, 64, 0.9]
+    pred[0, :, 1] = [170, 248, 64, 64, 0.8]
+    assert detect_layout([pred]) == "ultralytics"
+    found, found_scores, _ = postprocess(*decode_ultralytics(pred), lb, (1280, 720), 0.25, 0.7, 300)
+    assert found == [(272, 152, 128, 128)] and found_scores == [np.float32(0.9).item()], (found, found_scores)
+    return "letterbox 1280×720→640, decode DFL & ultralytics → kotak (272, 152, 128, 128), NMS buang duplikat"
+
+
+def check_recognition(cfg: Config, _: Path) -> str:
+    from pcdface.recognition.lbph import UNKNOWN, LBPHRecognizer, check_label
+
+    rng = np.random.default_rng(cfg.seed)
+    size = cfg.recognition.face_size
+    bases = {label: rng.integers(0, 256, (size[1], size[0])).astype(np.uint8) for label in ("S01", "S02")}
+
+    def noisy(image: np.ndarray) -> np.ndarray:
+        return np.clip(image.astype(int) + rng.integers(-12, 13, image.shape), 0, 255).astype(np.uint8)
+
+    recognizer = LBPHRecognizer(cfg.recognition)
+    recognizer.train([noisy(b) for b in bases.values() for _ in range(3)], [k for k in bases for _ in range(3)])
+    for label, base in bases.items():
+        prediction = recognizer.predict(noisy(base))
+        assert prediction.nearest == label, prediction
+    strict = LBPHRecognizer(dataclasses.replace(cfg.recognition, max_distance=1e-6))
+    strict.train([bases["S01"]], ["S01"])
+    assert strict.predict(noisy(bases["S02"])).label == UNKNOWN
+    try:
+        check_label("Budi")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("nama asli harus ditolak sebagai label")
+    return "LBPH membedakan 2 tekstur, ambang → unknown, label nama ditolak"
+
+
 CHECKS: list[tuple[str, Callable[[Config, Path], str]]] = [
     ("matching", check_matching),
     ("preprocessing", check_preprocessing),
     ("metrik", check_metrics),
     ("dataset sintetis", check_synthetic_dataset),
     ("detektor", check_detectors),
+    ("yolo (dekode)", check_yolo_decode),
+    ("pengenalan LBPH", check_recognition),
 ]
 
 

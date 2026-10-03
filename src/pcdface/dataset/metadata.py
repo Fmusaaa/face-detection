@@ -2,7 +2,8 @@
 
 Satu baris metadata per foto (PRD §6.6, ditambah kolom `subjects`, `pose`,
 `expression`, `occlusion`, dan `session` — PRD §12.2 butir 7, §6.2). `subjects.csv` hanya memuat kode peserta dan izinnya;
-nama asli tidak pernah disimpan di folder proyek.
+nama asli tidak pernah disimpan di folder proyek. Kolom `consent_recognition` (PRD v4 §11) boleh tidak ada di
+berkas lama dan dianggap "tidak": wajah peserta itu tidak pernah dipakai untuk melatih atau menguji pengenalan.
 """
 
 from __future__ import annotations
@@ -23,7 +24,9 @@ COLUMNS = (
 # Kolom yang boleh tidak ada di berkas lama; dianggap kosong saat dibaca
 OPTIONAL_COLUMNS = frozenset({"session", "expression", "occlusion"})
 SINGLE_FACE_SETS = ("jarak", "cahaya", "pose", "ekspresi", "oklusi")
-SUBJECT_COLUMNS = ("subject_id", "consent_research", "consent_publication", "consent_date")
+SUBJECT_COLUMNS = ("subject_id", "consent_research", "consent_publication", "consent_date", "consent_recognition")
+# Kolom subjects.csv yang boleh tidak ada (berkas sebelum v4); dianggap "tidak"
+OPTIONAL_SUBJECT_COLUMNS = frozenset({"consent_recognition"})
 
 SUBJECT_ID = re.compile(r"^S\d{2,3}$")
 FORMATION_ID = re.compile(r"^F\d+$")
@@ -174,6 +177,7 @@ class SubjectRow:
     consent_research: bool
     consent_publication: bool
     consent_date: str = ""
+    consent_recognition: bool = False   # izin terpisah: wajah dipakai untuk pengenalan identitas (LBPH)
 
     def to_csv(self) -> dict[str, str]:
         return {
@@ -181,6 +185,7 @@ class SubjectRow:
             "consent_research": "ya" if self.consent_research else "tidak",
             "consent_publication": "ya" if self.consent_publication else "tidak",
             "consent_date": self.consent_date,
+            "consent_recognition": "ya" if self.consent_recognition else "tidak",
         }
 
 
@@ -199,7 +204,7 @@ def read_subjects(path: Path) -> dict[str, SubjectRow]:
     subjects: dict[str, SubjectRow] = {}
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        missing = set(SUBJECT_COLUMNS) - set(reader.fieldnames or ())
+        missing = set(SUBJECT_COLUMNS) - OPTIONAL_SUBJECT_COLUMNS - set(reader.fieldnames or ())
         if missing:
             raise ValueError(f"{path}: kolom hilang {sorted(missing)}")
         for line_no, row in enumerate(reader, start=2):
@@ -214,6 +219,7 @@ def read_subjects(path: Path) -> dict[str, SubjectRow]:
                 consent_research=_yes(row["consent_research"], f"{where} consent_research"),
                 consent_publication=_yes(row["consent_publication"], f"{where} consent_publication"),
                 consent_date=(row["consent_date"] or "").strip(),
+                consent_recognition=_yes(row.get("consent_recognition") or "", f"{where} consent_recognition"),
             )
     return subjects
 

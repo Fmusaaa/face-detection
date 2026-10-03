@@ -14,7 +14,12 @@ data/**
 
 # Model — hanya checksums.txt yang di-commit
 models/*.tflite
+models/*.onnx
+models/*.pt
 models/*.part
+
+# venv khusus ekspor YOLO (ultralytics + PyTorch + opencv-python) — terpisah dari .venv
+.venv-yolo-export/
 
 # Hasil eksperimen memuat citra wajah
 results/

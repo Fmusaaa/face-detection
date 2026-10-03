@@ -1,7 +1,7 @@
-# PRD — Sistem Deteksi Wajah: OpenCV vs MediaPipe
+# PRD — Sistem Deteksi, Crop, dan Pengenalan Wajah: OpenCV vs MediaPipe vs YOLO
 
 **Proyek:** UTS Pengolahan Citra Digital (+ bahan jurnal)
-**Versi:** 3.3 — 29 September 2026 (E5 aktif, oklusi di E6, E7 blur gerak, delegate MediaPipe otomatis; 3.2: E6 pose & ekspresi; 3.1: MediaPipe via delegate Metal + `SRGBA`)
+**Versi:** 4.0 — 3 Oktober 2026 (YOLOv8-face lewat OpenCV DNN di E1–E7, `crop-faces`, pengenalan identitas LBPH berizin + E8; 3.3: E5 aktif, oklusi di E6, E7 blur gerak, delegate MediaPipe otomatis; 3.2: E6 pose & ekspresi; 3.1: MediaPipe via delegate Metal + `SRGBA`)
 **Status:** Siap diimplementasikan lewat Claude Code
 **Dokumen terkait:** `CLAUDE.md`, `docs/PROMPT_CLAUDE_CODE.md`, `docs/FORMULIR_PERSETUJUAN.md`
 
@@ -13,9 +13,12 @@
 |---|---|---|
 | v1 | Deteksi klasik: segmentasi warna kulit YCbCr + Haar Cascade | Kode **tidak dipakai** — v3 dibangun dari awal |
 | v2 | Deteksi + pengenalan identitas memakai DeepFace | **Dibatalkan** |
-| **v3** | **Deteksi saja — OpenCV (Haar Cascade) vs MediaPipe (BlazeFace)** | Dokumen ini |
+| v3 | Deteksi saja — OpenCV (Haar Cascade) vs MediaPipe (BlazeFace) | Dilanjutkan oleh v4 — seluruh isi v3 tetap berlaku |
+| **v4** | **v3 + YOLOv8-face (OpenCV DNN) + crop wajah hasil deteksi + pengenalan identitas LBPH berizin** | Dokumen ini |
 
-**Ruang lingkup v3:** sistem hanya menentukan **ada atau tidaknya wajah dan di mana letaknya** (kotak pembatas). Tidak ada pengenalan identitas, tidak ada database wajah, tidak ada DeepFace, tidak ada TensorFlow.
+**Ruang lingkup v3:** sistem menentukan **ada atau tidaknya wajah dan di mana letaknya** (kotak pembatas).
+
+**v4** (3 Oktober 2026, **sebelum** eksperimen E1–E7 dijalankan): arahan baru — "face recognition dan crop per foto sesuai wajah orang, pakai YOLO + OpenCV", dengan acuan repo [MariyaSha/FaceRecognition](https://github.com/MariyaSha/FaceRecognition) (YOLO `yolov8m-face` untuk deteksi + LBPH OpenCV untuk identitas). Tiga tambahan: (1) **YOLOv8-face** sebagai keluarga detektor ketiga di E1–E7 (§2, §5.3); (2) **`crop-faces`** — setiap wajah hasil deteksi dipotong per foto, opsional dikelompokkan per identitas (§7.1); (3) **pengenalan identitas LBPH** dan eksperimen **E8** (§5.4, §9). Batas yang tetap: tidak ada DeepFace, TensorFlow, *embedding* jaringan saraf, atau analisis atribut wajah; label identitas hanya kode pseudonim; hanya peserta yang menandatangani izin pengenalan (formulir bagian 7) yang wajahnya dipakai untuk pengenalan. Peserta yang menandatangani formulir v3 diberi tahu bahwa sistem "tidak mengenali siapa Anda" — foto mereka **tidak boleh** dipakai untuk pengenalan sebelum mereka menandatangani bagian 7. Keputusan v4 tidak mengubah satu pun keputusan v3 untuk Haar dan MediaPipe.
 
 v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang disalin dan tidak ada uji regresi v1. Gagasan v1 — enhancement pada kanal Y, detektor warna kulit YCbCr, greedy matching — ditulis ulang di paket `pcdface`.
 
@@ -35,6 +38,8 @@ v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang 
 | **R4** | Data wajah dari anggota kelompok, sebanyak-banyaknya | Protokol dataset §6 |
 | **R5** | Perbandingan deteksi untuk beberapa wajah sekaligus | E2 multi-wajah |
 | **R6** | Titik lemah deteksi: arah hadap, sudut kepala, ekspresi, wajah tertutup, gerak | E6 pose/ekspresi/oklusi, E7 blur gerak |
+| **R7** | Crop per foto sesuai wajah orang, memakai YOLO + OpenCV | `crop-faces` dengan `yolo_n` (§7.1), YOLO di E1–E7 |
+| **R8** | Pengenalan wajah — siapa orangnya | LBPH (`enroll`, `crop-faces --recognize`, demo), E8 |
 
 ---
 
@@ -46,20 +51,25 @@ v3 **dibangun dari awal** (keputusan 24 September 2026): tidak ada kode v1 yang 
 | `mp_short` | MediaPipe Face Detector, model BlazeFace *short-range* | CNN ringan | **P0** |
 | `mp_full` | MediaPipe Face Detector, model BlazeFace *full-range* | CNN ringan | **P0** — bila model berhasil diunduh di Fase 0 |
 | `mp_sparse` | MediaPipe BlazeFace Sparse *full-range* | CNN, ±60% lebih kecil dari full-range | P1 |
+| `yolo_n` | YOLOv8n-face (derronqi/yolov8-face, dilatih WIDER FACE) via OpenCV DNN | CNN satu tahap, *anchor-free* | **P0** (v4) |
+| `yolo_m` | yolov8m-face (akanametov/yolo-face) — model repo referensi MariyaSha | CNN satu tahap, lebih besar | P1 — butuh `export-yolo` |
 | `ycbcr` | Segmentasi warna kulit YCbCr (Chai & Ngan, 1999) | Klasik — pengolahan citra murni | P1 |
+
+Pengenal identitas (v4): **LBPH** — *Local Binary Patterns Histograms* (Ahonen dkk., 2006) dari `cv2.face`, dipakai sesudah deteksi (§5.4).
 
 ### 2.1 Perbedaan mekanisme — inti pembahasan jurnal
 
-Kedua keluarga detektor punya **cara berbeda memperlakukan ukuran wajah**, dan perbedaan inilah yang membuat perbandingannya menarik:
+Ketiga keluarga detektor punya **cara berbeda memperlakukan ukuran wajah**, dan perbedaan inilah yang membuat perbandingannya menarik:
 
-| | Haar Cascade | MediaPipe BlazeFace |
-|---|---|---|
-| Cara memindai | Piramida citra pada **resolusi asli**, jendela geser | Seluruh frame **diperkecil** ke ukuran masukan model (128×128 untuk *short-range*) |
-| Batas wajah terkecil | **Absolut dalam piksel** — parameter `minSize` (bawaan 30×30) | **Relatif terhadap lebar frame** — wajah selebar 43 px di frame 1280 px tinggal ±4 px di masukan model |
-| Jangkauan menurut dokumentasi | Tidak dinyatakan | *Short-range*: "works best for faces within 2 meters"; *full-range*: "best for faces within 5 meters" (dokumentasi MediaPipe Face Detection) |
-| Skor keyakinan | Tidak ada secara bawaan — diambil dari `levelWeights` via `detectMultiScale3` | Ada, 0–1 |
-| Bentuk kotak | Selalu persegi | Mengikuti wajah |
-| Titik landmark | Tidak ada | 6 titik |
+| | Haar Cascade | MediaPipe BlazeFace | YOLOv8-face |
+|---|---|---|---|
+| Cara memindai | Piramida citra pada **resolusi asli**, jendela geser | Seluruh frame **diperkecil** ke ukuran masukan model (128×128 untuk *short-range*) | Seluruh frame di-*letterbox* ke **640×640** (rasio aspek dijaga), prediksi di tiga skala (stride 8/16/32) sekaligus |
+| Batas wajah terkecil | **Absolut dalam piksel** — parameter `minSize` (bawaan 30×30) | **Relatif terhadap lebar frame** — wajah selebar 43 px di frame 1280 px tinggal ±4 px di masukan model | **Relatif terhadap lebar frame**, tetapi 5× lebih longgar dari BlazeFace — wajah 43 px di 1280 px tetap ±21 px di masukan 640 |
+| Jangkauan menurut dokumentasi | Tidak dinyatakan | *Short-range*: "works best for faces within 2 meters"; *full-range*: "best for faces within 5 meters" (dokumentasi MediaPipe Face Detection) | Tidak dinyatakan; data latih WIDER FACE memuat banyak wajah kecil dan profil |
+| Skor keyakinan | Tidak ada secara bawaan — diambil dari `levelWeights` via `detectMultiScale3` | Ada, 0–1 | Ada, 0–1 (sigmoid) |
+| Bentuk kotak | Selalu persegi | Mengikuti wajah | Mengikuti wajah (gaya anotasi WIDER FACE) |
+| Titik landmark | Tidak ada | 6 titik | 5 titik (`yolo_n`); tidak ada (`yolo_m`) |
+| Perangkat (Mac proyek) | CPU | GPU (Metal) | CPU (OpenCV DNN) |
 
 ### 2.2 Hipotesis
 
@@ -69,6 +79,8 @@ Kedua keluarga detektor punya **cara berbeda memperlakukan ukuran wajah**, dan p
 - **H4 — Kecepatan.** MediaPipe lebih cepat per frame dibanding Haar pada resolusi yang sama.
 - **H5 — Pose dan ekspresi.** Haar `frontalface_default` dilatih pada wajah tampak depan, jadi recall-nya turun tajam begitu kepala menoleh ≥ 45° dan hilang pada profil (90°). BlazeFace lebih toleran terhadap toleh dan anggukan sedang (±30°), tetapi juga gagal pada profil penuh. Ekspresi (senyum, marah, kaget) tidak menurunkan recall secara berarti pada wajah yang menghadap kamera — tetapi skor MediaPipe bisa turun. Penutup wajah bagian bawah (masker, tangan) paling merugikan Haar, karena kaskade `frontalface_default` memakai pola hidung–mulut; kacamata hitam menghapus pola mata yang juga dipakai keduanya.
 - **H6 — Blur gerak.** Blur menurunkan recall lebih cepat pada wajah jauh (kecil) daripada wajah dekat, dan lebih merugikan Haar (tepi terang–gelap yang dicari fitur Haar ikut kabur) daripada BlazeFace.
+- **H1–H6 untuk YOLO (v4).** YOLOv8n-face mempertahankan recall ≥ 0,90 di seluruh 50–300 cm (masukan 640 px, data latih WIDER FACE penuh wajah kecil) — lebih jauh dari `mp_full`. **H2:** resolusi tidak berpengaruh — 1280×720 dan 640×360 sama-sama menjadi 640×360 di dalam letterbox, jadi selisihnya hanya dari beda interpolasi (`INTER_AREA` saat membuat versi kecil vs `INTER_LINEAR` di dalam letterbox). **H4:** YOLO paling lambat per frame (±8 GFLOPs di CPU, BlazeFace < 1 GFLOPs di GPU). **H5:** YOLO paling toleran terhadap toleh hingga 60–90°, karena WIDER FACE memuat wajah profil; oklusi bawah (masker, tangan) merugikannya lebih sedikit daripada Haar.
+- **H7 — Pengenalan LBPH (v4).** Dengan galeri 5 foto frontal 100 cm per peserta, akurasi rank-1 LBPH: (a) turun dengan jarak, karena wajah kecil diperbesar ke 200×200 sehingga tekstur LBP hilang; (b) relatif tahan cahaya terang/redup (kode LBP tidak berubah oleh perubahan kecerahan monoton) tetapi turun pada *backlight* (perubahan tidak seragam); (c) turun tajam pada toleh ≥ 30° dan pada masker/tangan, karena histogram per sel grid 8×8 membandingkan sel yang sama letaknya; (d) jalur ujung-ke-ujung YOLO + LBPH tidak lebih tinggi dari LBPH pada kotak manual.
 
 Hipotesis ditulis **sebelum** data diambil. Hasil yang membantah hipotesis tetap dilaporkan apa adanya — itu temuan, bukan kegagalan.
 
@@ -90,6 +102,8 @@ Hipotesis ditulis **sebelum** data diambil. Hasil yang membantah hipotesis tetap
 
 **RQ7 — Blur gerak (R6).** Seberapa panjang blur gerak yang masih bisa ditoleransi setiap detektor, dan apakah toleransi itu bergantung pada jarak?
 
+**RQ8 — Pengenalan identitas (R8, v4).** Seberapa akurat LBPH mengenali peserta yang terdaftar dengan 5 foto frontal, bagaimana akurasinya berubah menurut jarak, cahaya, pose, ekspresi, dan penutup wajah, berapa sering peserta tak terdaftar keliru diterima (FAR), dan berapa yang hilang bila crop diambil dari deteksi YOLO alih-alih kotak manual?
+
 ### Mengapa ukuran wajah dilaporkan dalam piksel dan proporsi
 
 Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandakan jarak membagi dua lebar wajah di citra. Jarak dalam sentimeter hanya berlaku untuk kamera yang dipakai; ukuran wajah minimum bisa dipakai kamera lain. Karena mekanisme kedua detektor berbeda (§2.1), batas Haar paling tepat dinyatakan dalam **piksel**, sedangkan batas MediaPipe dalam **proporsi lebar frame**. Laporan menyajikan ketiganya.
@@ -106,8 +120,8 @@ Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandak
 
 | Tidak dikerjakan | Keterangan |
 |---|---|
-| Pengenalan / identifikasi siapa orangnya | Batasan proyek |
-| DeepFace, TensorFlow, *embedding*, database wajah | Keputusan v3 |
+| Pengenalan identitas selain LBPH; identitas peserta tanpa izin pengenalan; nama asli sebagai label | Keputusan v4: hanya LBPH, hanya kode `S01`…, hanya `consent_recognition` = ya |
+| DeepFace, TensorFlow, PyTorch di `.venv`, *embedding* jaringan saraf, database wajah di luar `data/recognition/` | Keputusan v3, tetap di v4 (PyTorch hanya di venv ekspor terpisah, §5.3) |
 | Analisis usia, gender, emosi, ras | Set ekspresi dan oklusi (E6) hanya kondisi perekaman; sistem tidak menebak ekspresi atau benda yang dipakai |
 | Tracking antar frame | Demo tetap deteksi ulang tiap frame |
 | Melatih atau *fine-tune* model | Semua model memakai bobot resmi |
@@ -115,8 +129,8 @@ Menurut model kamera lubang jarum, `w_px ≈ f_px × W_wajah / Z` — menggandak
 
 ### Batasan masalah (siap tempel ke Bab I)
 
-1. Sistem hanya melakukan deteksi wajah, yaitu menentukan ada atau tidaknya wajah beserta lokasinya dalam citra, tanpa mengenali identitas individu.
-2. Metode yang dibandingkan adalah Haar Cascade dari pustaka OpenCV dan BlazeFace dari MediaPipe dengan bobot model resmi tanpa pelatihan ulang.
+1. Sistem melakukan deteksi wajah (ada atau tidaknya wajah beserta lokasinya), memotong setiap wajah, dan mengenali identitas peserta terdaftar dengan LBPH. Identitas hanya berupa kode pseudonim, dan hanya peserta yang memberi izin pengenalan secara tertulis yang didaftarkan.
+2. Detektor yang dibandingkan adalah Haar Cascade dari pustaka OpenCV, BlazeFace dari MediaPipe, dan YOLOv8-face yang dijalankan dengan modul DNN OpenCV, semuanya dengan bobot model yang dipublikasikan tanpa pelatihan ulang. Pengenal identitas adalah LBPH dari OpenCV yang dilatih hanya dengan foto pendaftaran peserta.
 3. Citra diambil menggunakan webcam laptop pada resolusi 1280×720 piksel, pada jarak 50–300 cm, dalam empat kondisi pencahayaan.
 4. Objek uji berupa wajah anggota kelompok yang telah memberikan persetujuan tertulis, dengan jumlah 1–4 wajah per citra. Wajah tampak depan, kecuali pada set pose (toleh hingga 90°, angguk dan miring 30°, sudut nominal), set ekspresi (netral, senyum, marah, kaget), dan set oklusi (masker, tangan, kacamata hitam). Blur gerak diuji secara simulasi, bukan direkam.
 5. Sistem tidak melakukan tracking antar frame dan tidak menganalisis atribut wajah.
@@ -134,13 +148,19 @@ citra (BGR, OpenCV)
    │     haar       → abu-abu (equalize: on|off) → detectMultiScale(3)  │
    │     mp_short   → BGR→RGBA → mp.Image(SRGBA) → FaceDetector (Metal) │
    │     mp_full    → sama, model full-range                            │
+   │     yolo_n     → letterbox 640 → OpenCV DNN (ONNX) → DFL + NMS      │
    │     ycbcr (P1) → segmentasi kulit + morfologi + CCL                │
    │                                                                    ▼
    │                                        DetectionResult(boxes, scores, elapsed_ms)
    │                                                                    │
-   └─► kotak manual (ground truth) ─────────────► EVALUASI ◄────────────┘
-                                                  P/R/F1, IoU, AP, FPPI,
-                                                  akurasi hitung, per jarak
+   ├─► kotak manual (ground truth) ─────────────► EVALUASI ◄────────────┤
+   │                                              P/R/F1, IoU, AP, FPPI, │
+   │                                              akurasi hitung, per jarak
+   │                                                                    ▼
+   └──────────────► crop wajah (kotak manual atau deteksi) → abu-abu 200×200
+                        │
+                        ├─► crop-faces: berkas per wajah, per foto / per identitas
+                        └─► LBPH (galeri peserta berizin) → S01 … / unknown → E8
 ```
 
 Semua detektor mengembalikan tipe `DetectionResult` yang sama: `boxes`, `scores` (daftar skor per kotak, `None` bila detektor tidak punya skor), `elapsed_ms`, `stages` (citra antar-tahap, opsional), dan `info` (keterangan khusus detektor, mis. kandidat YCbCr yang ditolak). Dataclass-nya `kw_only`, jadi urutan medan tidak berpengaruh.
@@ -169,6 +189,23 @@ Semua detektor mengembalikan tipe `DetectionResult` yang sama: `boxes`, `scores`
 | sparse (P1) | `https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range_sparse.tflite` |
 
 URL full-range dan sparse di atas diambil dari halaman dokumentasi resmi, tetapi belum bisa diverifikasi dengan unduhan langsung saat PRD ini ditulis. Fase 0 wajib memastikan ketiganya benar-benar terunduh; bila full-range gagal, `mp_full` turun ke P1 dan hal itu dicatat.
+
+### 5.3 Ketentuan implementasi YOLO (v4)
+
+- **Hanya OpenCV DNN** (`cv2.dnn.readNetFromONNX`, backend OpenCV, target CPU). Paket `ultralytics` tidak dipasang di `.venv`: ia menarik `opencv-python` (saat diuji 3 Oktober 2026: `opencv-python` **5.0**) dan PyTorch, yang menimpa `cv2` dari `opencv-contrib-python<5` (§13.2). Bobot `.pt` diekspor ke ONNX oleh `python -m pcdface export-yolo` di venv terpisah `.venv-yolo-export/` dengan `imgsz=640, opset=12, simplify=True, dynamic=False`.
+- **Prapemrosesan sama dengan ultralytics**: letterbox ke 640×640 (rasio aspek dijaga, sisa diisi abu-abu 114 di tengah, `INTER_LINEAR`), BGR→RGB, skala 1/255. Waktu deteksi mencakup letterbox, *blob*, inferensi, dekode, dan NMS.
+- **Dua tata letak keluaran ONNX** dikenali otomatis: satu tensor `(1, 5[+15], 8400)` hasil ekspor ultralytics (kotak `cx, cy, w, h` dan skor sudah jadi), atau tiga tensor head mentah `(1, 64+1+15, H, W)` per stride (derronqi/hpc203) yang didekode dengan DFL — softmax 16 bin per sisi → jarak ke tepi × stride. Diuji 3 Oktober 2026 pada model YOLOv8n 1-kelas berbobot acak yang diekspor ultralytics 8.4: pada 3 foto (186 kotak), semua kotak `pcdface` cocok dengan `ultralytics.predict` (onnxruntime) dengan selisih < 1 px (pembulatan ke piksel bulat), kecuali 7 kotak yang skornya kembar atau berselisih < 2·10⁻⁶ dengan kotak lain — urutan NMS untuk skor kembar memang tidak tertentu. Model berbobot asli tidak punya skor kembar sebanyak itu.
+- **Parameter bawaan ultralytics** untuk titik operasi: `conf=0,25`, NMS IoU 0,7, `max_det=300`. Run AP menurunkan ambang keyakinan ke 0,05 — lantai skor yang sama dengan MediaPipe — dan NMS tetap 0,7. Skor sigmoid selalu > 0, dan kandidat disaring > ambang sebelum `NMSBoxes`, jadi jebakan §5.1 tidak terjadi.
+- **Model.** `yolo_n` = `yolov8n-face.onnx` (derronqi/yolov8-face, WIDER FACE; ONNX dari repo hpc203/yolov8-face-landmarks-opencv-dnn, dipatok ke commit `1f91851`, SHA-256 `d22820ff…afeb5` di `models/checksums.txt`), diunduh `download-models`. `yolo_m` = `yolov8m-face.pt` dari rilis `v0.0.0` akanametov/yolo-face — model yang dipakai repo referensi — diekspor `export-yolo`. URL rilis akanametov belum bisa diverifikasi dari lingkungan pengembangan; bila gagal, unduh manual ke `models/`.
+- **Kotak** dikembalikan ke koordinat citra asli (kurangi pita letterbox, bagi skala) lalu dipotong ke batas citra. Landmark 5 titik (`yolo_n`) disimpan di `info["keypoints"]` untuk demo.
+
+### 5.4 Ketentuan implementasi pengenalan LBPH (v4)
+
+- Alur sama dengan repo referensi: crop kotak wajah → abu-abu → ukuran 200×200 → `cv2.face.LBPHFaceRecognizer` (radius 1, 8 tetangga, grid 8×8 — bawaan OpenCV). `INTER_AREA` saat memperkecil, `INTER_LINEAR` saat memperbesar.
+- Prediksi = label galeri dengan jarak histogram (chi-kuadrat) terkecil. Jarak > `recognition.max_distance` (65, nilai repo referensi) → `unknown`. Ambang ini **tidak** dipilih ulang dari hasil E8 (§12.2 butir 13).
+- Label hanya kode `S01`… — label lain ditolak saat pelatihan. Model terlatih (`lbph.yml` + `labels.json`) disimpan di `data/recognition/`: histogram LBP wajah adalah **templat biometrik** (§11).
+- **Galeri operasional** (`enroll`, dipakai demo dan `crop-faces --recognize`): semua foto kondisi acuan peserta berizin — jarak acuan, cahaya normal, `depan`, `netral`, `tanpa` (±14 foto per peserta), kotak manual atau deteksi (`--source yolo_n`). Mode `--folder faces/S01/*.jpg` meniru repo referensi; nama subfolder harus kode peserta.
+- Galeri E8 lebih sempit (§9 E8), supaya foto kondisi acuan lain tersisa sebagai pembanding.
 
 ---
 
@@ -291,9 +328,13 @@ Perintah `crop` mengekspor isi setiap kotak ke `data/crops/{set}/...` untuk tiga
 
 Untuk wajah yang menoleh (set pose), kiri-kanan kotak adalah batas **bagian wajah yang tampak**: dari tepi pipi yang terlihat sampai ujung hidung atau tepi pipi seberang, mana yang lebih luar; telinga tetap tidak dimasukkan. Pada profil 90° kotak menjadi sempit dan tinggi. Wajah yang menunduk/mendongak/miring tetap dibatasi garis rambut–dagu, dan kotaknya tetap tegak (tidak diputar). Wajah yang tertutup (set oklusi) tetap dikotakkan **utuh** dari garis rambut sampai ujung dagu, termasuk bagian di balik masker, tangan, atau kacamata — perkirakan letak dagu dari bentuk masker/rahang.
 
-**Konsekuensi yang wajib dibahas:** setiap detektor punya konvensi kotaknya sendiri — Haar selalu persegi, BlazeFace punya proporsinya sendiri — dan keduanya berbeda dari aturan kotak manual. Karena itu IoU dilaporkan pada ambang utama **0,5** dan juga **0,3 serta 0,4** sebagai uji sensitivitas. Bila peringkat detektor berubah antar ambang, perbedaan konvensi kotak ikut berperan dan harus disebutkan.
+**Konsekuensi yang wajib dibahas:** setiap detektor punya konvensi kotaknya sendiri — Haar selalu persegi, BlazeFace dan YOLO punya proporsinya sendiri (YOLO mengikuti gaya anotasi WIDER FACE) — dan semuanya berbeda dari aturan kotak manual. Karena itu IoU dilaporkan pada ambang utama **0,5** dan juga **0,3 serta 0,4** sebagai uji sensitivitas. Bila peringkat detektor berubah antar ambang, perbedaan konvensi kotak ikut berperan dan harus disebutkan.
 
 ---
+
+### 7.1 Crop hasil deteksi — `crop-faces` (R7, v4)
+
+`crop` mengekspor kotak **manual** (ground truth). `crop-faces` mengekspor kotak **hasil deteksi** (bawaan `yolo_n`) dari foto apa pun — folder dataset atau foto lain: setiap wajah menjadi berkas `<nama foto>_f<N>.jpg` (N urut kiri → kanan), opsional dilebarkan `--margin`, dengan manifest `crop_wajah.csv` (kotak, skor, identitas, jarak LBPH). Dengan `--recognize`, crop dikelompokkan ke folder `S01/`, `S02/`, …, `unknown/` menurut model LBPH. Keluarannya di `results/crop_wajah/` (di-*gitignore*).
 
 ## 8. Metrik (R3)
 
@@ -351,6 +392,18 @@ Waktu deteksi per frame diukur dengan `time.perf_counter()`: satu *warm-up* dibu
 - Setiap proporsi (recall, precision, akurasi hitung) disertai **interval Wilson 95%**.
 - AP dan F1 disertai **interval bootstrap 95%**, 1000 resampel **per subjek** untuk set satu wajah dan **per citra** untuk set multi-wajah.
 - Dua detektor hanya disebut "lebih baik" bila intervalnya tidak tumpang tindih. Bila tumpang tindih, tulis bahwa perbedaannya tidak dapat disimpulkan pada ukuran sampel ini.
+
+### 8.7 Pengenalan identitas (R8, v4)
+
+| Metrik | Definisi |
+|---|---|
+| Akurasi rank-1 | Proporsi foto uji yang tetangga terdekatnya di galeri = peserta sebenarnya (identifikasi tertutup, tanpa ambang) |
+| DIR | *Detection and identification rate* pada ambang: benar **dan** jarak ≤ `max_distance` |
+| FRR | Foto uji peserta terdaftar yang ditolak (jarak > ambang, atau wajah tidak terdeteksi) |
+| FAR | *Leave-one-subject-out*: model dilatih tanpa peserta k, semua foto k diuji; proporsi yang tetap diterima sebagai orang lain |
+| Kurva DIR–FAR | DIR dan FAR di seluruh rentang ambang — tukar-tambah *open-set* (Phillips dkk., 2011) |
+
+Proporsi disertai Wilson 95%; akurasi keseluruhan juga bootstrap per peserta. Selisih kondisi − acuan memakai bootstrap berpasangan per peserta.
 
 ---
 
@@ -416,6 +469,20 @@ Blur diterapkan pada citra yang sama untuk setiap level, jadi selisih recall ter
 
 **Keterbatasan:** blur simulasi seragam di seluruh bingkai, sedangkan blur asli hanya mengenai bagian yang bergerak dan bisa disertai efek *rolling shutter*. Hasil E7 dibaca sebagai batas toleransi terhadap kekaburan, bukan replika gerak nyata.
 
+### E8 — Pengenalan identitas LBPH (P0, v4) → RQ8, H7
+
+| Faktor | Level |
+|---|---|
+| Peserta | Hanya `consent_research` **dan** `consent_recognition` = ya; minimal 2 |
+| Galeri | Set jarak di jarak acuan (100 cm), cahaya normal — 5 foto per peserta |
+| Foto uji | Semua foto satu wajah lain dari peserta yang sama: jarak 50–300 cm, cahaya, pose (100/200 cm), ekspresi, oklusi; "acuan" = `depan` 100 cm + `netral` + `tanpa` (kondisi galeri, momen lain) |
+| Sumber kotak | `manual` (LBPH saja) dan `yolo_n` (ujung-ke-ujung: galeri dan foto uji di-crop dari deteksi; wajah tak terdeteksi = gagal) |
+| Ambang | `max_distance` 65 (repo referensi), tetap |
+
+Keluaran: akurasi rank-1, DIR, FRR, FAR per sumber; akurasi per faktor × level; selisih akurasi tiap level terhadap acuan pada peserta yang sama (jarak dan cahaya terhadap kumpulan foto acuan; pose, ekspresi, oklusi terhadap level acuan set yang sama); kurva DIR–FAR; prediksi per foto (audit).
+
+**Keterbatasan:** jumlah peserta kecil (identifikasi di antara 4–10 orang jauh lebih mudah daripada di antara ribuan), galeri dan foto uji direkam di sesi yang sama (pakaian, rambut, dan cahaya mirip — akurasi lintas hari kemungkinan lebih rendah), dan LBPH sensitif terhadap pergeseran crop.
+
 ### Ringkasan prioritas
 
 | Eksperimen | Prioritas | Data |
@@ -427,6 +494,7 @@ Blur diterapkan pada citra yang sama untuk setiap level, jadi selisih recall ter
 | E5 | P0 | Set jarak + multi + kosong |
 | E6 | P0 | Set pose + ekspresi + oklusi |
 | E7 | P0 | Set jarak (blur simulasi) |
+| E8 | P0 (v4) | Set satu wajah peserta berizin pengenalan |
 
 Set kosong ikut dihitung di semua eksperimen untuk FPPI.
 
@@ -450,6 +518,9 @@ Grafik minimum:
 10. Recall per ekspresi wajah (E6)
 11. Recall per penutup wajah (E6)
 12. Recall terhadap jarak per panjang blur gerak, satu panel per detektor (E7)
+13. Akurasi pengenalan terhadap jarak, kotak manual vs YOLO + LBPH (E8)
+14. Akurasi pengenalan per cahaya, pose, ekspresi, dan penutup wajah (E8)
+15. Kurva DIR–FAR dengan titik ambang config (E8)
 
 Contoh gambar deteksi hanya memakai wajah subjek yang mencentang izin publikasi; wajah lainnya diburamkan.
 
@@ -457,7 +528,7 @@ Contoh gambar deteksi hanya memakai wajah subjek yang mencentang izin publikasi;
 
 ## 11. Privasi dan Etika Data
 
-Walaupun sistem tidak mengenali siapa pun, foto wajah tetap data pribadi. UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi, Pasal 4 ayat (2), menggolongkan **data biometrik** sebagai data pribadi yang bersifat spesifik, dan penjelasannya menyebut gambar wajah sebagai contoh data biometrik.
+Foto wajah adalah data pribadi, dan sejak v4 sistem juga **mengenali** peserta — pemrosesan data biometrik untuk identifikasi. UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi, Pasal 4 ayat (2), menggolongkan **data biometrik** sebagai data pribadi yang bersifat spesifik, dan penjelasannya menyebut gambar wajah sebagai contoh data biometrik.
 
 | Ketentuan | Implementasi |
 |---|---|
@@ -465,7 +536,10 @@ Walaupun sistem tidak mengenali siapa pun, foto wajah tetap data pribadi. UU No.
 | Izin publikasi wajah terpisah | Kotak centang terpisah di formulir |
 | Pseudonim | `S01`, … ; nama asli tidak disimpan di folder proyek |
 | Lokal saja | `data/` dan `results/` di-*gitignore* |
-| Hak menarik diri | Perintah `forget S03` menghapus foto, crop, metadata, dan anotasi subjek tersebut. Citra multi-wajah yang memuat subjek itu ikut dihapus |
+| Hak menarik diri | Perintah `forget S03` menghapus foto, crop, metadata, dan anotasi subjek tersebut. Citra multi-wajah yang memuat subjek itu ikut dihapus. Model LBPH yang memuat subjek itu ikut dihapus (latih ulang dengan `enroll`) |
+| Izin pengenalan terpisah (v4) | Formulir bagian 7 → kolom `consent_recognition` di `subjects.csv` (berkas lama tanpa kolom ini = "tidak"). Tanpa `ya`, wajah peserta tidak pernah masuk galeri LBPH maupun E8. Peserta yang menandatangani formulir v3 harus menandatangani bagian 7 dulu |
+| Templat biometrik | Model LBPH di `data/recognition/` (di-*gitignore*), tidak pernah dibagikan. `validate` memberi GALAT bila model memuat peserta tanpa izin |
+| Tanpa nama | Label pengenalan hanya kode `S01`…; label lain ditolak. Wajah yang tidak cocok dengan galeri berlabel `unknown` — sistem tidak pernah menebak nama |
 | Retensi | Data dihapus setelah nilai UTS keluar, atau setelah jurnal terbit bila subjek menyetujui publikasi |
 
 ---
@@ -508,9 +582,12 @@ pcd-face-detection/
 │   │   ├── base.py                   # DetectionResult(boxes, scores, elapsed_ms, stages)
 │   │   ├── haar.py                   # detectMultiScale (titik operasi), detectMultiScale3 + NMS (run AP), flag equalize
 │   │   ├── mediapipe_detector.py     # Tasks API, short/full/sparse
+│   │   ├── yolo.py                   # YOLOv8-face lewat OpenCV DNN: letterbox, dekode ultralytics/DFL, NMS (v4)
 │   │   ├── ycbcr.py                  # segmentasi kulit + morfologi + CCL + saring geometri
 │   │   ├── fake.py                   # detektor tiruan untuk tes tanpa model
 │   │   └── registry.py               # nama → detektor, dibaca dari config
+│   ├── recognition/
+│   │   └── lbph.py                   # LBPH cv2.face, aturan galeri, izin, simpan/muat templat (v4)
 │   ├── evaluation/
 │   │   ├── matching.py               # IoU, greedy matching, pencocokan urut skor (AP)
 │   │   ├── operating_point.py        # P/R/F1, rerata IoU, FPPI
@@ -526,15 +603,19 @@ pcd-face-detection/
 │   │   ├── e4_speed.py
 │   │   ├── e5_sensitivity.py
 │   │   ├── e6_pose_expression.py     # pose, ekspresi, oklusi
-│   │   └── e7_motion_blur.py
+│   │   ├── e7_motion_blur.py
+│   │   └── e8_recognition.py         # pengenalan LBPH: manual vs YOLO, LOSO FAR, kurva DIR–FAR (v4)
 │   ├── reporting/
 │   │   ├── tables.py
-│   │   └── plots.py                  # dua belas grafik §10
+│   │   └── plots.py                  # lima belas grafik §10
 │   └── tools/
-│       ├── download_models.py
+│       ├── download_models.py        # .tflite + yolov8n-face.onnx, SHA-256
+│       ├── export_yolo.py            # .pt → .onnx di venv terpisah (v4)
 │       ├── capture.py                # rekam per set/subjek/jarak/formasi + tulis metadata
 │       ├── annotate.py               # gambar kotak ground truth
 │       ├── crop.py
+│       ├── crop_faces.py             # crop setiap wajah hasil deteksi, opsional per identitas (v4)
+│       ├── enroll.py                 # latih LBPH dari peserta berizin (v4)
 │       ├── validate.py
 │       ├── demo_realtime.py          # demo webcam, ganti detektor saat berjalan
 │       └── forget.py
@@ -549,7 +630,9 @@ pcd-face-detection/
 │   ├── test_stats.py
 │   ├── test_detectors_contract.py    # semua detektor mematuhi DetectionResult
 │   ├── test_pipeline_fake.py         # jalur penuh dengan FakeDetector
-│   └── test_models_smoke.py          # @pytest.mark.models, butuh berkas .tflite
+│   ├── test_yolo.py                  # letterbox, dekode, NMS, config YOLO tanpa model (v4)
+│   ├── test_recognition.py           # LBPH, izin, enroll, forget, crop-faces, E8 (v4)
+│   └── test_models_smoke.py          # @pytest.mark.models, butuh berkas .tflite / .onnx
 └── results/                          # di-gitignore
 ```
 
@@ -557,16 +640,19 @@ pcd-face-detection/
 
 | Perintah | Fungsi |
 |---|---|
-| `download-models` | Unduh `.tflite`, tulis dan verifikasi SHA-256 |
+| `download-models` | Unduh `.tflite` dan `yolov8n-face.onnx`, tulis dan verifikasi SHA-256 |
+| `export-yolo [--weights yolov8m-face]` | Unduh `.pt` akanametov, ekspor ke ONNX di `.venv-yolo-export/`, verifikasi dengan OpenCV DNN (v4) |
+| `enroll [--source yolo_n] [--folder faces/]` | Latih LBPH dari foto kondisi acuan peserta berizin → `data/recognition/` (v4) |
+| `crop-faces [--input …] [--recognize] [--margin 0.2]` | Crop setiap wajah hasil deteksi per foto; opsional dikelompokkan per kode peserta (v4) |
 | `capture --set jarak --subject S03 --distance 150 --lighting normal --count 5` | Rekam dan tulis metadata |
 | `capture --set multi --formation F5 --count 5` | Posisi diambil dari tabel formasi di config |
 | `capture --set pose --subject S03 --distance 200 --pose semua` | Semua pose berurutan di satu jarak; instruksi tampil di layar |
 | `capture --set ekspresi --subject S03 --expression semua` | Semua ekspresi berurutan di jarak acuan |
 | `capture --set oklusi --subject S03 --occlusion semua` | Semua penutup wajah berurutan di jarak acuan |
 | `annotate` / `crop` / `validate` | Anotasi, ekspor crop, periksa konsistensi data |
-| `run e1` … `run e7`, `run all` | Eksperimen; `--synthetic` memakai citra sintetis + FakeDetector |
+| `run e1` … `run e8`, `run all` | Eksperimen; `--synthetic` memakai citra sintetis + FakeDetector |
 | `report` | Bangun ulang tabel dan grafik dari hasil tersimpan |
-| `demo --detector mp_short` | Demo realtime; tombol untuk ganti detektor saat berjalan |
+| `demo --detector mp_short` | Demo realtime; tombol untuk ganti detektor saat berjalan, `r` = pengenalan LBPH (v4) |
 | `forget S03` | Hapus seluruh data satu subjek |
 | `selftest` | Uji seluruh metrik dengan nilai acuan + jalur Haar/YCbCr/Fake pada citra sintetis, tanpa webcam dan tanpa model |
 
@@ -585,6 +671,13 @@ Keputusan berikut mengisi celah yang tidak ditentukan bagian lain. Semuanya diba
 9. **E6 memakai titik operasi saja** (parameter bawaan, tanpa enhancement, resolusi asli). Metrik utama recall, karena setiap citra pose/ekspresi/oklusi berisi tepat satu wajah; FP tetap dilaporkan. Acuan perbandingan adalah `depan` di jarak yang sama, `netral`, dan `tanpa`, **dari peserta yang sama**; selisihnya diuji dengan bootstrap berpasangan per peserta. Kiri dan kanan digabung per sudut (`e6_per_sumbu`) karena toleh dianggap simetris; tabel per pose tetap memisahkannya. **Sudut maksimum** = sudut terbesar sehingga pose depan dan semua sudut di bawahnya punya recall ≥ `recall_target` (titik; versi konservatif memakai batas bawah Wilson). Haar yang dipakai tetap `frontalface_default` — kaskade profil OpenCV tidak ditambahkan, supaya E6 mengukur detektor yang sama dengan E1–E4.
 10. **E7**: blur gerak linear horizontal (0°), panjang kernel 0/5/11/21 px pada resolusi asli, diterapkan setelah enhancement (`none`) dan sebelum deteksi; waktu blur tidak dihitung. Level dan arah dari config, ditetapkan sebelum data diambil.
 11. **Delegate MediaPipe** `auto`: GPU (Metal) di macOS — satu-satunya yang berjalan di Mac proyek — dan CPU di Windows/Linux. Variabel lingkungan `PCDFACE_MP_DELEGATE` dapat menimpanya. **Hasil yang dilaporkan hanya dari Mac proyek**; laptop lain dipakai untuk merekam, menganotasi, dan menguji jalur. Kolom `perangkat` di E4 dan `config_snapshot.yaml` mencatat perangkat yang benar-benar dipakai.
+
+Butir 12–15 ditetapkan 3 Oktober 2026 (v4), sebelum E1–E8 dijalankan pada data asli:
+
+12. **YOLO di E1–E7.** `yolo_n` (YOLOv8n-face) masuk daftar detektor E1–E4, E6, dan E7 dengan parameter bawaan ultralytics (`conf` 0,25, NMS 0,7, `max_det` 300, masukan 640) dan lewat OpenCV DNN di CPU. Varian *nano* dipilih untuk P0 karena setara kelas "CNN ringan" BlazeFace dan cukup cepat untuk demo; `yolo_m` (model repo referensi) P1. Run AP: `yolo_conf_threshold` 0,05 (sama dengan MediaPipe). E3 tidak punya varian YOLO selain enhancement. Keputusan Haar dan MediaPipe (butir 1–11) tidak berubah.
+13. **E8.** Galeri = set jarak di jarak acuan, cahaya normal (5 foto/peserta); foto uji = semua foto satu wajah lain dari peserta yang sama; "acuan" = foto `depan` 100 cm, `netral`, `tanpa`. Ambang `max_distance` 65 dari repo referensi dan **tidak dipilih ulang** dari kurva DIR–FAR. Parameter LBPH bawaan OpenCV. Sumber ujung-ke-ujung = `experiments.e8.detector` (`yolo_n`); pasangan deteksi–wajah = IoU tertinggi ≥ `iou_primary`.
+14. **Izin pengenalan.** Hanya peserta dengan `consent_research` dan `consent_recognition` = ya yang masuk galeri, foto uji, dan FAR. Kolom yang tidak ada dianggap "tidak". Foto peserta lain tetap dipakai E1–E7 sesuai izin v3.
+15. **Galeri operasional** (`enroll`) = semua foto kondisi acuan (±14/peserta) — lebih banyak dari galeri E8, karena dipakai untuk demo dan `crop-faces`, bukan untuk angka penelitian.
 
 ---
 
@@ -622,6 +715,8 @@ pytest>=8.0
 
 `opencv-python` 4.14 yang sekarang terpasang di Python global tidak mengganggu, selama semua pekerjaan dilakukan di dalam `.venv`.
 
+**v4 tidak menambah dependensi.** YOLO berjalan lewat `cv2.dnn` dan LBPH lewat `cv2.face`, keduanya bagian `opencv-contrib-python`. `ultralytics` (beserta PyTorch dan `opencv-python` yang ditariknya) hanya ada di `.venv-yolo-export/`, dibuat oleh `export-yolo`, dan hanya dibutuhkan untuk `yolo_m`.
+
 ---
 
 ## 14. Kriteria Selesai per Fase
@@ -634,6 +729,7 @@ pytest>=8.0
 | **3 — Detektor & metrik** | haar (skor + equalize), mediapipe, fake, registry, seluruh modul evaluasi | Tes metrik lulus dengan nilai acuan hitungan tangan; tes kontrak detektor lulus; `pytest -m models` lulus |
 | **4 — Eksperimen** | E1–E7, runner, perkecilan resolusi | `run all --synthetic` menghasilkan semua tabel §10 tanpa galat |
 | **5 — Pelaporan & demo** | tables, plots, demo dengan MediaPipe | Dua belas grafik terbentuk; demo bisa berganti haar ↔ mp_short ↔ mp_full saat berjalan |
+| **6 — YOLO, crop, pengenalan (v4)** | yolo (OpenCV DNN), export-yolo, crop-faces, recognition/lbph, enroll, E8, grafik 13–15, demo `r` | `pytest` dan `pytest -m models` lulus (YOLO menemukan wajah asli + 5 landmark); dekoder sama dengan `ultralytics.predict`; `run all --synthetic` menulis tabel E8; `forget` menghapus templat; `.venv` tanpa `ultralytics`/`opencv-python` |
 
 Sepanjang semua fase: `pytest` hijau, dan tidak ada berkas dari `data/`, `models/*.tflite`, atau citra `results/` yang ter-*commit*.
 
@@ -674,6 +770,12 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 | Masker/kacamata hitam tidak tersedia saat sesi | Siapkan sebelum pertemuan (§6.4); level yang tidak direkam otomatis hilang dari tabel, bukan galat |
 | Jalur delegate CPU belum pernah diuji (Mac proyek hanya bisa GPU) | `pytest` dan `run all --synthetic` di laptop anggota lain sebelum dipakai; hasil penelitian tetap dari Mac proyek (§12.2 butir 11) |
 | Blur simulasi tidak sama dengan gerak asli | Disebut keterbatasan di E7; tidak diklaim sebagai replika gerak nyata |
+| `ultralytics` dipasang di `.venv` dan menimpa `cv2` | YOLO lewat OpenCV DNN; ekspor `.pt` hanya di `.venv-yolo-export/` (§5.3, CLAUDE.md aturan #3) |
+| Unduhan bobot akanametov gagal (GitHub Releases diblokir jaringan) | `yolo_m` hanya P1; unduh manual lalu `export-yolo --weights models/<nama>.pt` |
+| Foto peserta v3 dipakai untuk pengenalan tanpa izin baru | `consent_recognition` wajib, bawaan "tidak"; `validate` memperingatkan; formulir bagian 7 |
+| Model LBPH (templat biometrik) bocor atau tertinggal setelah peserta menarik diri | `data/recognition/` di-*gitignore*; `forget` menghapusnya; `validate` GALAT bila memuat peserta tanpa izin |
+| Akurasi LBPH tinggi semu karena galeri dan foto uji satu sesi | Disebut keterbatasan E8; acuan = foto momen lain, bukan foto galeri |
+| Demo mencerminkan tampilan, galeri tidak | Kotak dipetakan balik ke frame asli sebelum LBPH (diuji di `demo --selftest`) |
 
 
 
@@ -681,11 +783,18 @@ Sesuaikan dengan tanggal UTS sebenarnya.
 
 ## 17. Referensi
 
+- Ahonen, T., Hadid, A., & Pietikäinen, M. (2006). Face description with local binary patterns: Application to face recognition. *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 28(12), 2037–2041.
+- akanametov. *yolo-face* — model YOLO untuk deteksi wajah (yolov8m-face). https://github.com/akanametov/yolo-face
 - Bazarevsky, V., Kartynnik, Y., Vakunov, A., Raveendran, K., & Grundmann, M. (2019). BlazeFace: Sub-millisecond neural face detection on mobile GPUs. *arXiv:1907.05047*.
+- derronqi. *yolov8-face* — YOLOv8 deteksi wajah dan landmark, dilatih WIDER FACE. https://github.com/derronqi/yolov8-face (ONNX untuk OpenCV DNN: https://github.com/hpc203/yolov8-face-landmarks-opencv-dnn)
 - Chai, D., & Ngan, K. N. (1999). Face segmentation using skin-color map in videophone applications. *IEEE Transactions on Circuits and Systems for Video Technology*, 9(4), 551–564.
 - Everingham, M., Van Gool, L., Williams, C. K. I., Winn, J., & Zisserman, A. (2010). The PASCAL Visual Object Classes (VOC) Challenge. *International Journal of Computer Vision*, 88(2), 303–338.
 - Google AI Edge. *Face detection guide — MediaPipe*. https://developers.google.com/edge/mediapipe/solutions/vision/face_detector
+- Jocher, G., Chaurasia, A., & Qiu, J. (2023). *Ultralytics YOLOv8*. https://github.com/ultralytics/ultralytics
 - Lugaresi, C., dkk. (2019). MediaPipe: A framework for building perception pipelines. *arXiv:1906.08172*.
+- MariyaSha. *FaceRecognition* — YOLO + OpenCV LBPH (repo referensi v4). https://github.com/MariyaSha/FaceRecognition
+- Ojala, T., Pietikäinen, M., & Mäenpää, T. (2002). Multiresolution gray-scale and rotation invariant texture classification with local binary patterns. *IEEE TPAMI*, 24(7), 971–987.
+- Phillips, P. J., Grother, P., & Micheals, R. (2011). Evaluation methods in face recognition. Dalam S. Z. Li & A. K. Jain (Ed.), *Handbook of Face Recognition* (ed. ke-2, hlm. 551–574). Springer.
 - Undang-Undang Republik Indonesia Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi.
 - Viola, P., & Jones, M. (2001). Rapid object detection using a boosted cascade of simple features. *Proceedings of CVPR 2001*.
 - Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209–212.
@@ -713,6 +822,7 @@ paths:                               # relatif terhadap akar proyek
   crops: data/crops
   models: models
   results: results
+  recognition: data/recognition      # model LBPH terlatih — templat biometrik, tidak pernah di-commit
 
 capture:
   width: 1280
@@ -771,6 +881,20 @@ detectors:
     min_detection_confidence: 0.5
     min_suppression_threshold: 0.3
     delegate: auto
+  yolo_n:                            # YOLOv8n-face (derronqi, WIDER FACE) lewat OpenCV DNN — PRD §5.3
+    type: yolo
+    model: yolov8n-face.onnx         # python -m pcdface download-models
+    input_size: 640
+    conf_threshold: 0.25             # bawaan ultralytics predict
+    nms_iou: 0.7                     # bawaan ultralytics predict
+    max_detections: 300
+  yolo_m:                            # P1 — yolov8m-face akanametov, model repo referensi MariyaSha
+    type: yolo
+    model: yolov8m-face.onnx         # python -m pcdface export-yolo
+    input_size: 640
+    conf_threshold: 0.25
+    nms_iou: 0.7
+    max_detections: 300
   ycbcr:                             # P1 — Chai & Ngan (1999)
     type: ycbcr
     cb_range: [77, 127]
@@ -792,21 +916,22 @@ evaluation:
     mp_min_detection_confidence: 0.05
     haar_min_neighbors: 0
     haar_nms_iou: 0.3                # samakan dengan min_suppression_threshold MediaPipe
+    yolo_conf_threshold: 0.05        # lantai skor sama dengan MediaPipe; NMS YOLO tetap 0,7
   size_bins_px: [0, 20, 30, 40, 50, 60, 80, 100, 150, 250, 10000]
   size_bins_ratio: [0, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15, 0.25, 1.0]
 
 experiments:
   e1:
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
     resolutions: [[1280, 720], [640, 360]]
   e2:
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
   e3:
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
     haar_equalize: [true, false]
     enhancements: [none, clahe]
   e4:
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
     resolutions: [[1280, 720], [640, 360]]
     warmup_runs: 1
     repeats: 100
@@ -816,11 +941,21 @@ experiments:
     scale_factors: [1.05, 1.1, 1.2]
     min_neighbors: [3, 5, 7]
   e6:
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
   e7:                                # blur gerak simulasi pada set jarak (PRD §9)
-    detectors: [haar, mp_short, mp_full]
+    detectors: [haar, mp_short, mp_full, yolo_n]
     blur_px: [0, 5, 11, 21]          # panjang kernel blur gerak horizontal di 1280×720; 0 = asli
     blur_angle_deg: 0                # 0 = horizontal (kepala/badan bergerak ke samping)
+  e8:                                # pengenalan identitas LBPH (PRD v4 §9 E8) — hanya peserta consent_recognition
+    detector: yolo_n                 # jalur ujung-ke-ujung: crop dari deteksi detektor ini
+
+recognition:                         # LBPH (Ahonen dkk., 2006) seperti repo referensi MariyaSha — PRD §5.4
+  face_size: [200, 200]              # crop abu-abu diubah ke ukuran ini sebelum LBPH
+  max_distance: 65.0                 # jarak LBPH > ambang → "unknown" (nilai repo referensi)
+  radius: 1                          # parameter LBPH bawaan OpenCV
+  neighbors: 8
+  grid_x: 8
+  grid_y: 8
 
 stats:
   ci_level: 0.95

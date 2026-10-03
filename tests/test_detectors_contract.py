@@ -53,7 +53,7 @@ def test_real_classical_detectors_contract(cfg, sample_image, name, mode):
         assert detector.has_scores == (mode == "ap")
 
 
-@pytest.mark.parametrize("name", ["haar", "mp_short", "mp_full", "mp_sparse", "ycbcr"])
+@pytest.mark.parametrize("name", ["haar", "mp_short", "mp_full", "mp_sparse", "ycbcr", "yolo_n", "yolo_m"])
 @pytest.mark.parametrize("mode", ["operating", "ap"])
 def test_fake_detectors_contract_and_determinism(cfg, sample_image, name, mode):
     if mode == "ap" and not supports_scores(name, cfg):
@@ -71,6 +71,21 @@ def test_fake_profiles_mimic_absolute_vs_relative_limits(synthetic_paths):
     box_full, box_half = (0, 0, 50, 65), (0, 0, 25, 32)
     assert haar._probability(box_half, 640, 0.8, 150) < haar._probability(box_full, 1280, 0.8, 150) - 0.3
     assert mp._probability(box_half, 640, 0.8, 150) == pytest.approx(mp._probability(box_full, 1280, 0.8, 150))
+
+
+def test_fake_yolo_is_relative_and_beats_mediapipe_on_small_faces():
+    yolo, mp = FakeDetector("yolo_n", PROFILES["yolo_n"]), FakeDetector("mp_full", PROFILES["mp_full"])
+    small = (0, 0, 26, 34)                                     # wajah ±300 cm pada 1280 px
+    assert yolo._probability(small, 1280, 0.8, 150) > mp._probability(small, 1280, 0.8, 150)
+    assert yolo._probability((0, 0, 13, 17), 640, 0.8, 150) == pytest.approx(yolo._probability(small, 1280, 0.8, 150))
+
+
+def test_registry_model_helpers(cfg):
+    from pcdface.detection.registry import model_file
+
+    assert model_file("haar", cfg) is None and model_file("ycbcr", cfg) is None
+    assert model_file("yolo_n", cfg) == cfg.paths.models / "yolov8n-face.onnx"
+    assert model_file("mp_short", cfg).suffix == ".tflite"
 
 
 def test_registry_overrides_and_errors(cfg):
